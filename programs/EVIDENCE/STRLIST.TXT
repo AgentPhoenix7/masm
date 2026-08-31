@@ -1,0 +1,5 @@
+STRCMP............STRLIB            STRLEN............STRLIB
+STRREV............STRLIB            
+
+STRLIB            Offset: 00000010H  Code and data size: 5fH
+  STRCMP            STRLEN            STRREV          

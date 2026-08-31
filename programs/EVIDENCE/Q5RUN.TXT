@@ -1,0 +1,9 @@
+
+QUESTION 5 - STRING OPERATION LIBRARY
+String 1: NETWORK
+String 2: NETWORL
+STRLEN(string 1) = 7
+STRLEN(string 2) = 7
+STRCMP result: string 1 is less than string 2
+Before STRREV: NETWORK
+After  STRREV: KROWTEN

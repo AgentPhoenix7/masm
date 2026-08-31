@@ -1,0 +1,4 @@
+{
+  "masmtasm.ASM.assembler": "MASM-v6.11",
+  "masmtasm.ASM.emulator": "dosbox"
+}

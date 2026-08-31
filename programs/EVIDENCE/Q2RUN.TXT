@@ -1,7 +1,24 @@
 
 QUESTION 2 - 20-BYTE ZIG-ZAG ARRAY
-Required relation: a0 < a1 > a2 < a3 > ...
-Input array:       12 05 19 02 11 08 1F 04 16 0A 1B 01 0D 07 1D 03 14 09 18 06 
-Before, DS:4000H: 12 05 19 02 11 08 1F 04 16 0A 1B 01 0D 07 1D 03 14 09 18 06 
-After,  DS:4000H: 05 19 02 12 08 1F 04 16 0A 1B 01 11 07 1D 03 14 09 18 06 0D 
-Verification: PASS - alternating < and > relations hold.
+Enter decimal byte (0-255): 18
+Enter decimal byte (0-255): 5
+Enter decimal byte (0-255): 25
+Enter decimal byte (0-255): 2
+Enter decimal byte (0-255): 17
+Enter decimal byte (0-255): 8
+Enter decimal byte (0-255): 31
+Enter decimal byte (0-255): 4
+Enter decimal byte (0-255): 22
+Enter decimal byte (0-255): 10
+Enter decimal byte (0-255): 27
+Enter decimal byte (0-255): 1
+Enter decimal byte (0-255): 13
+Enter decimal byte (0-255): 7
+Enter decimal byte (0-255): 29
+Enter decimal byte (0-255): 3
+Enter decimal byte (0-255): 20
+Enter decimal byte (0-255): 9
+Enter decimal byte (0-255): 24
+Enter decimal byte (0-255): 6
+Original array: 18 5 25 2 17 8 31 4 22 10 27 1 13 7 29 3 20 9 24 6 
+Zig-zag array:  5 25 2 18 8 31 4 22 10 27 1 17 7 29 3 20 9 24 6 13 

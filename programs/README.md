@@ -14,8 +14,9 @@ path t:\
 buildall
 ```
 
-`BUILDALL.BAT` assembles and links Q1 through Q4, creates the real static
-library `STRLIB.LIB`, and links `Q5DEMO.EXE` against that library.
+`BUILDALL.BAT` assembles and links Q1, Q2, Q3, Q4, and Q5 directly, one
+after another - each is a single self-contained source file, so there is
+no separate library-build step and no extra demo program to link.
 
 To execute everything, use:
 
@@ -23,7 +24,11 @@ To execute everything, use:
 runall
 ```
 
-The calculator can also be used interactively:
+`RUNALL.BAT` runs `Q1.EXE` through `Q5.EXE` once each, interactively; it
+pauses at each program's own prompts and does not redirect input from any
+fixture file.
+
+Run the calculator interactively:
 
 ```dos
 q4
@@ -52,68 +57,121 @@ as keyboard input with `xdotool`. `EVIDENCE/Q1RUN.TXT` contains that run.
 
 ### Q2.ASM - 20-number zig-zag array
 
-- Copies the twenty-number input to offset `DS:4000H`.
-- Rearranges the copy in place with the relation
-  `a0 < a1 > a2 < a3 > ...`.
-- Checks all nineteen adjacent relations and prints `PASS` only if they hold.
+- Prompts interactively for twenty decimal bytes (`0` through `255`), one
+  per line, each read with DOS buffered keyboard input and echoed back
+  after the `Enter decimal byte (0-255):` prompt.
+- Stores the twenty values directly at offset `DS:4000H`.
+- Rearranges the array in place with the relation
+  `a0 < a1 > a2 < a3 > ...`, swapping each adjacent pair that does not
+  already satisfy the required inequality.
+- Prints the original array and the rearranged (zig-zag) array.
 
-Run `q2`. It prints the input, the contents at `DS:4000H` before and after
-rearrangement, and the verification result.
+Run `q2`, then enter the twenty values one at a time, each followed by
+Enter. The verified run uses
+`18 5 25 2 17 8 31 4 22 10 27 1 13 7 29 3 20 9 24 6`, which produces:
+
+```text
+5 25 2 18 8 31 4 22 10 27 1 17 7 29 3 20 9 24 6 13
+```
+
+`EVIDENCE/Q2RUN.TXT` contains that run's full transcript, and
+`screenshots/q2.png` shows the same session in the DOSBox window.
 
 ### Q3.ASM - hexadecimal to ASCII
 
-- Stores the numeric word `3FA7H`, not an already formatted text string.
-- Converts its four nibbles to the ASCII characters `3FA7`.
-- Shows the output buffer changing from `00 00 00 00` to
-  `33 46 41 37`, the ASCII byte values for `3`, `F`, `A`, and `7`.
+- Prompts interactively for one hex byte (`00` through `FF`) typed as two
+  hex digits.
+- Converts the two typed digits into the corresponding byte value and
+  prints it back as `Hex value: <XX>H`.
+- If the byte falls in the printable ASCII range, also prints
+  `ASCII value: <character>`; otherwise reports it is not printable.
 
-Run `q3` to show both the readable result and the underlying byte change.
+Run `q3` and type two hex digits at the prompt. The verified run enters
+`68`, producing:
+
+```text
+Hex value: 68H
+ASCII value: h
+```
+
+`EVIDENCE/Q3RUN.TXT` and `screenshots/q3.png` capture that run.
 
 ### Q4.ASM - basic calculator
 
+- Prompts interactively for a first operand, an operator, and a second
+  operand, each read with DOS buffered keyboard input.
 - Accepts unsigned decimal operands from 0 through 255.
 - Supports addition, signed-result subtraction, multiplication, and division.
 - Division reports both quotient and remainder and rejects division by zero.
 - Rejects invalid numbers and unsupported operators.
 
-Run `q4` for interactive use. The supplied input fixtures demonstrate all
-operations noninteractively:
+Run `q4` and answer its three prompts (`First operand:`,
+`Operator (+, -, *, /):`, `Second operand:`) for one calculation per
+invocation. The verified demonstration runs (one program invocation each)
+are:
 
-```dos
-q4 < q4add.in
-q4 < q4sub.in
-q4 < q4mul.in
-q4 < q4div.in
-```
+| First | Operator | Second | Result |
+| ----- | -------- | ------ | ------ |
+| `12`  | `+`      | `5`    | `Result: 17` |
+| `5`   | `-`      | `12`   | `Result: -7` |
+| `25`  | `*`      | `10`   | `Result: 250` |
+| `29`  | `/`      | `4`    | `Quotient: 7  Remainder: 1` |
+| `29`  | `/`      | `0`    | `ERROR: division by zero.` |
 
-They produce `17`, `-7`, `250`, and quotient `7` with remainder `1`.
-`EVIDENCE/Q4ZERO.OUT` and `EVIDENCE/Q4BAD.OUT` show the verified error paths
-for division by zero and an unsupported operator.
+`EVIDENCE/Q4ADD.OUT`, `Q4SUB.OUT`, `Q4MUL.OUT`, `Q4DIV.OUT`, and
+`Q4ZERO.OUT` each capture one of these five runs, and
+`screenshots/q4-add.png`, `q4-subtract.png`, `q4-multiply.png`,
+`q4-divide.png`, and `q4-zero.png` show the same five cases in the DOSBox
+window.
 
-### STRLIB.ASM and Q5DEMO.ASM - string operation library
+### Q5.ASM - string operations
 
-`STRLIB.ASM` exports three zero-terminated-string procedures:
+Q5 contains three library-style, zero-terminated-string procedures in one
+standalone source file - `STRLEN`, `STRCMP`, and `STRREV` - rather than a
+separate `STRLIB.LIB` static library plus a `Q5DEMO.EXE` client linked
+against it. That consolidation was an explicitly approved design change:
+one interactive, self-contained program is simpler to build and run than
+a library-plus-demo pair, with no loss of the procedures themselves.
 
 - `STRLEN`: `DS:SI` points to the string; returns its length in `AX`.
-- `STRCMP`: `DS:SI` and `DS:DI` point to the strings; returns `FFFFH`, `0`, or
-  `1` for less than, equal, or greater than.
+- `STRCMP`: `DS:SI` and `DS:DI` point to the strings; returns `FFFFH`, `0`,
+  or `1` for less than, equal, or greater than.
 - `STRREV`: `DS:SI` points to a writable string; reverses it in place and
   returns its length in `AX`.
 
-`STRLIB.LIB` is an actual Microsoft OMF library, not just a source file named
-"library." `Q5DEMO.EXE` is a separate client linked against it. Run `q5demo`
-to show both lengths, comparison, and the in-place change from `NETWORK` to
-`KROWTEN`. `EVIDENCE/STRLIST.TXT` lists all three public library symbols.
+The program prompts interactively for two strings (up to 30 characters
+each), then prints both lengths, the comparison result, and the first
+string reversed.
+
+Run `q5` and type each string at its prompt (`String 1:`, `String 2:`).
+The verified run enters `NETWORK` then `NETWORL`, producing:
+
+```text
+Length of string 1: 7
+Length of string 2: 7
+Comparison: string 1 is less than string 2
+Reversed string 1: KROWTEN
+```
+
+`EVIDENCE/Q5RUN.TXT` and `screenshots/q5.png` capture that run.
 
 ## Evidence
 
 Text captures of every verified run are stored under `EVIDENCE/`. DOSBox
-window screenshots are stored in `/home/agntdrgn/masm/screenshots/`:
+window screenshots are stored in `screenshots/` at the repository root
+(a sibling of this `programs/` directory):
 
 - `q1.png`, `q2.png`, `q3.png`
-- `q4-add.png`, `q4-subtract.png`, `q4-multiply.png`, `q4-divide.png`
+- `q4-add.png`, `q4-subtract.png`, `q4-multiply.png`, `q4-divide.png`,
+  `q4-zero.png`
 - `q5.png`
 
 All five executables were assembled and linked successfully in DOSBox 0.74-3.
 The assembler reported zero warning errors and zero severe errors for every
 source file.
+
+Note: DOS's buffered keyboard input in this DOSBox/MASM environment can hang
+if you type an unusually long, clearly invalid entry at any prompt; if this
+happens, restart DOSBox. Every program's input buffer is sized with generous
+headroom so this should not occur with any reasonable or even mistyped
+input.

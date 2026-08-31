@@ -6,17 +6,32 @@ STACKSEG SEGMENT PARA STACK 'STACK'
 STACKSEG ENDS
 
 DATASEG SEGMENT PARA PUBLIC 'DATA'
-    Q4_TITLE DB 13,10,'QUESTION 4 - BASIC CALCULATOR',13,10,'$'
-    Q4_RANGE DB 'Enter unsigned decimal operands from 0 through 255.',13,10,'$'
-    PROMPT_FIRST DB 'First operand: $'
-    PROMPT_OPERATOR DB 'Operator (+, -, *, /): $'
-    PROMPT_SECOND DB 'Second operand: $'
-    RESULT_LABEL DB 'Result: $'
+    Q4_TITLE      DB 13,10,'QUESTION 4 - BASIC CALCULATOR',13,10,'$'
+    Q4_RANGE      DB 'Enter unsigned decimal operands from 0 through 255.',13,10,'$'
+    FIRST_PROMPT  DB 'First operand: $'
+    OPERATOR_PROMPT DB 'Operator (+, -, *, /): $'
+    SECOND_PROMPT DB 'Second operand: $'
+    RESULT_LABEL  DB 'Result: $'
     QUOTIENT_LABEL DB 'Quotient: $'
     REMAINDER_LABEL DB '  Remainder: $'
     INVALID_INPUT DB 'ERROR: input must be a decimal number from 0 through 255.',13,10,'$'
     INVALID_OPERATOR DB 'ERROR: unsupported operator.',13,10,'$'
-    DIVIDE_ZERO DB 'ERROR: division by zero.',13,10,'$'
+    DIVIDE_ZERO   DB 'ERROR: division by zero.',13,10,'$'
+
+    ; DOS function 0AH buffer: maximum length, actual length, characters.
+    ; Empirically verified against this authentic DOSBox 0.74-3 / MASM 5.10
+    ; environment (see Q2.ASM/Q3.ASM): typing exactly maxlen characters
+    ; never returns from INT 21H/AH=0AH here, so maxlen must sit well above
+    ; the longest valid entry. Valid input is 1-3 decimal digits, so
+    ; maxlen=6 leaves generous headroom; the char area is sized maxlen+1
+    ; (7) to also hold the CR DOS writes after the typed characters.
+    INPUT_BUFFER  DB 6,0,7 DUP (0)
+
+    ; Valid input is exactly one character (+, -, *, /). Same rationale as
+    ; above: maxlen=4 leaves headroom above the 1-character valid entry, and
+    ; the char area is sized maxlen+1 (5) for the trailing CR.
+    OPERATOR_BUFFER DB 4,0,5 DUP (0)
+
 OPERAND1 DW 0
 OPERAND2 DW 0
 OPERATOR DB 0
@@ -32,35 +47,38 @@ START:
     MOV DS, AX
 
     LEA DX, Q4_TITLE
-    CALL PRINT_DOS
+    CALL PRINT_STRING
     LEA DX, Q4_RANGE
-    CALL PRINT_DOS
+    CALL PRINT_STRING
 
-    LEA DX, PROMPT_FIRST
-    CALL PRINT_DOS
-    CALL READ_UINT8
-    JNC Q4_FIRST_OK
-    JMP Q4_BAD_INPUT
-Q4_FIRST_OK:
+    LEA DX, FIRST_PROMPT
+    CALL PRINT_STRING
+    CALL READ_BYTE
+    JNC FIRST_OK
+    JMP BAD_INPUT
+FIRST_OK:
+    XOR AH, AH
     MOV OPERAND1, AX
-    CALL PRINT_CRLF
+    CALL PRINT_NEWLINE
 
-    LEA DX, PROMPT_OPERATOR
-    CALL PRINT_DOS
-    MOV AH, 01H
-    INT 21H
+    LEA DX, OPERATOR_PROMPT
+    CALL PRINT_STRING
+    CALL READ_OPERATOR
+    JNC OPERATOR_OK
+    JMP BAD_OPERATOR
+OPERATOR_OK:
     MOV OPERATOR, AL
-    CALL DISCARD_LINE
-    CALL PRINT_CRLF
+    CALL PRINT_NEWLINE
 
-    LEA DX, PROMPT_SECOND
-    CALL PRINT_DOS
-    CALL READ_UINT8
-    JNC Q4_SECOND_OK
-    JMP Q4_BAD_INPUT
-Q4_SECOND_OK:
+    LEA DX, SECOND_PROMPT
+    CALL PRINT_STRING
+    CALL READ_BYTE
+    JNC SECOND_OK
+    JMP BAD_INPUT
+SECOND_OK:
+    XOR AH, AH
     MOV OPERAND2, AX
-    CALL PRINT_CRLF
+    CALL PRINT_NEWLINE
 
     MOV AL, OPERATOR
     CMP AL, '+'
@@ -71,22 +89,20 @@ Q4_SECOND_OK:
     JE Q4_MULTIPLY
     CMP AL, '/'
     JE Q4_DIVIDE
-    LEA DX, INVALID_OPERATOR
-    CALL PRINT_DOS
-    JMP Q4_EXIT_ERROR
+    JMP BAD_OPERATOR
 
 Q4_ADD:
     MOV AX, OPERAND1
     ADD AX, OPERAND2
     LEA DX, RESULT_LABEL
-    CALL PRINT_DOS
+    CALL PRINT_STRING
     CALL PRINT_UINT
-    CALL PRINT_CRLF
+    CALL PRINT_NEWLINE
     JMP Q4_EXIT_OK
 
 Q4_SUBTRACT:
     LEA DX, RESULT_LABEL
-    CALL PRINT_DOS
+    CALL PRINT_STRING
     MOV AX, OPERAND1
     CMP AX, OPERAND2
     JAE Q4_SUB_POSITIVE
@@ -99,7 +115,7 @@ Q4_SUB_POSITIVE:
     SUB AX, OPERAND2
 Q4_SUB_PRINT:
     CALL PRINT_UINT
-    CALL PRINT_CRLF
+    CALL PRINT_NEWLINE
     JMP SHORT Q4_EXIT_OK
 
 Q4_MULTIPLY:
@@ -107,9 +123,9 @@ Q4_MULTIPLY:
     MOV BX, OPERAND2
     MUL BX
     LEA DX, RESULT_LABEL
-    CALL PRINT_DOS
+    CALL PRINT_STRING
     CALL PRINT_UINT
-    CALL PRINT_CRLF
+    CALL PRINT_NEWLINE
     JMP SHORT Q4_EXIT_OK
 
 Q4_DIVIDE:
@@ -121,24 +137,29 @@ Q4_DIVIDE:
     MOV QUOTIENT, AX
     MOV REMAINDER, DX
     LEA DX, QUOTIENT_LABEL
-    CALL PRINT_DOS
+    CALL PRINT_STRING
     MOV AX, QUOTIENT
     CALL PRINT_UINT
     LEA DX, REMAINDER_LABEL
-    CALL PRINT_DOS
+    CALL PRINT_STRING
     MOV AX, REMAINDER
     CALL PRINT_UINT
-    CALL PRINT_CRLF
+    CALL PRINT_NEWLINE
     JMP SHORT Q4_EXIT_OK
 
-Q4_BAD_INPUT:
-    CALL PRINT_CRLF
+BAD_INPUT:
+    CALL PRINT_NEWLINE
     LEA DX, INVALID_INPUT
-    CALL PRINT_DOS
+    CALL PRINT_STRING
+    JMP SHORT Q4_EXIT_ERROR
+BAD_OPERATOR:
+    CALL PRINT_NEWLINE
+    LEA DX, INVALID_OPERATOR
+    CALL PRINT_STRING
     JMP SHORT Q4_EXIT_ERROR
 Q4_DIVIDE_ZERO:
     LEA DX, DIVIDE_ZERO
-    CALL PRINT_DOS
+    CALL PRINT_STRING
 Q4_EXIT_ERROR:
     MOV AX, 4C01H
     INT 21H
@@ -146,83 +167,170 @@ Q4_EXIT_OK:
     MOV AX, 4C00H
     INT 21H
 
-; Reads a line containing an unsigned decimal number in the range 0..255.
-; Returns AX = value and CF clear, or CF set for invalid input.
-READ_UINT8 PROC NEAR
+; Read one decimal byte with DOS buffered keyboard input.
+; Accepts 1 to 3 decimal digits, rejects non-digits and values above 255.
+; Returns: AX = value and CF clear, or CF set for invalid input.
+; Preserves: BX, CX, DX, SI, and DI.
+READ_BYTE PROC NEAR
     PUSH BX
     PUSH CX
     PUSH DX
     PUSH SI
-    XOR BX, BX
-    XOR SI, SI
-RU_READ:
-    MOV AH, 01H
+    PUSH DI
+
+    LEA DX, INPUT_BUFFER
+    MOV AH, 0AH
     INT 21H
-    CMP AL, 13
-    JE RU_FINISH
-    CMP AL, 10
-    JE RU_FINISH
-    CMP AL, '0'
-    JB RU_BAD
-    CMP AL, '9'
-    JA RU_BAD
-    MOV DL, AL
+
+    XOR CX, CX
+    MOV CL, INPUT_BUFFER+1
+    OR CX, CX
+    JZ RB_BAD
+    CMP CX, 3
+    JA RB_BAD
+
+    LEA SI, INPUT_BUFFER+2
+    XOR BX, BX
+RB_DIGIT:
+    MOV DL, [SI]
+    CMP DL, '0'
+    JB RB_BAD
+    CMP DL, '9'
+    JA RB_BAD
     SUB DL, '0'
     XOR DH, DH
+    MOV DI, DX
+
     MOV AX, BX
-    SHL AX, 1
-    MOV CX, AX
-    SHL AX, 1
-    SHL AX, 1
-    ADD AX, CX
-    ADD AX, DX
+    MOV DX, 10
+    MUL DX
+    ADD AX, DI
     CMP AX, 255
-    JA RU_BAD
+    JA RB_BAD
     MOV BX, AX
+
     INC SI
-    JMP SHORT RU_READ
-RU_FINISH:
-    OR SI, SI
-    JZ RU_INVALID
+    LOOP RB_DIGIT
     MOV AX, BX
     CLC
-    JMP SHORT RU_RETURN
-RU_BAD:
-    CMP AL, 13
-    JE RU_INVALID
-    CMP AL, 10
-    JE RU_INVALID
-RU_CONSUME:
-    MOV AH, 01H
-    INT 21H
-    CMP AL, 13
-    JE RU_INVALID
-    CMP AL, 10
-    JNE RU_CONSUME
-RU_INVALID:
+    JMP SHORT RB_DONE
+RB_BAD:
     STC
-RU_RETURN:
+RB_DONE:
+    POP DI
     POP SI
     POP DX
     POP CX
     POP BX
     RET
-READ_UINT8 ENDP
+READ_BYTE ENDP
 
-DISCARD_LINE PROC NEAR
-    PUSH AX
-DL_NEXT:
-    MOV AH, 01H
+; Read one operator character with DOS buffered keyboard input.
+; Requires exactly one typed character, accepts only +, -, *, or /.
+; Returns: AL = operator character and CF clear, or CF set for invalid
+; input (wrong length or unsupported character).
+READ_OPERATOR PROC NEAR
+    PUSH BX
+    PUSH CX
+    PUSH DX
+    PUSH SI
+
+    LEA DX, OPERATOR_BUFFER
+    MOV AH, 0AH
     INT 21H
-    CMP AL, 13
-    JE DL_DONE
-    CMP AL, 10
-    JNE DL_NEXT
-DL_DONE:
+
+    CMP OPERATOR_BUFFER+1, 1
+    JNE RO_BAD
+
+    MOV AL, OPERATOR_BUFFER+2
+    CMP AL, '+'
+    JE RO_OK
+    CMP AL, '-'
+    JE RO_OK
+    CMP AL, '*'
+    JE RO_OK
+    CMP AL, '/'
+    JE RO_OK
+    JMP SHORT RO_BAD
+RO_OK:
+    CLC
+    JMP SHORT RO_DONE
+RO_BAD:
+    STC
+RO_DONE:
+    POP SI
+    POP DX
+    POP CX
+    POP BX
+    RET
+READ_OPERATOR ENDP
+
+; Print the dollar-terminated string at DS:DX.
+PRINT_STRING PROC NEAR
+    PUSH AX
+    PUSH DX
+    MOV AH, 09H
+    INT 21H
+    POP DX
     POP AX
     RET
-DISCARD_LINE ENDP
+PRINT_STRING ENDP
 
-    INCLUDE COMMON.INC
+; Print the single character in DL.
+PRINT_CHAR PROC NEAR
+    PUSH AX
+    PUSH DX
+    MOV AH, 02H
+    INT 21H
+    POP DX
+    POP AX
+    RET
+PRINT_CHAR ENDP
+
+; Print a carriage return and line feed.
+PRINT_NEWLINE PROC NEAR
+    PUSH AX
+    PUSH DX
+    MOV DL, 13
+    MOV AH, 02H
+    INT 21H
+    MOV DL, 10
+    MOV AH, 02H
+    INT 21H
+    POP DX
+    POP AX
+    RET
+PRINT_NEWLINE ENDP
+
+; Print the unsigned 16-bit value in AX as decimal.
+PRINT_UINT PROC NEAR
+    PUSH AX
+    PUSH BX
+    PUSH CX
+    PUSH DX
+
+    MOV BX, 10
+    XOR CX, CX
+PU_DIVIDE:
+    XOR DX, DX
+    DIV BX
+    PUSH DX
+    INC CX
+    OR AX, AX
+    JNZ PU_DIVIDE
+PU_DIGIT:
+    POP DX
+    ADD DL, '0'
+    MOV AH, 02H
+    INT 21H
+    LOOP PU_DIGIT
+
+    POP DX
+    POP CX
+    POP BX
+    POP AX
+    RET
+PRINT_UINT ENDP
+
 CODESEG ENDS
 END START

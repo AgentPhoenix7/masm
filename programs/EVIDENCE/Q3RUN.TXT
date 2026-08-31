@@ -1,6 +1,5 @@
 
-QUESTION 3 - HEXADECIMAL TO ASCII
-Numeric input word: 0x3FA7
-ASCII buffer before conversion: 00 00 00 00 
-ASCII characters after conversion: 3FA7
-ASCII byte values after conversion: 33 46 41 37 
+QUESTION 3 - HEX BYTE TO ASCII CHARACTER
+Enter a hex byte (00-FF): 68
+Hex value: 68H
+ASCII value: h

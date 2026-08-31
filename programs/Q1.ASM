@@ -1,25 +1,25 @@
-; Question 1
-; Transform ten user-entered bytes at DS:3000H using (value * 5) + 10,
-; then transfer the results to DS:4000H.
+; Question 1 - beginner version
+; Read 10 bytes, calculate (value * 5) + 10, and transfer the results.
 
 STACKSEG SEGMENT PARA STACK 'STACK'
     DW 128 DUP (?)
 STACKSEG ENDS
 
 DATASEG SEGMENT PARA PUBLIC 'DATA'
-    Q1_TITLE DB 13,10,'QUESTION 1 - TRANSFORMED BLOCK TRANSFER',13,10,'$'
-    Q1_FORMULA DB 'Formula applied to every byte: (value * 5) + 10',13,10,'$'
-    Q1_PROMPT DB 'Enter byte $'
-    Q1_PROMPT_TAIL DB ' (0-255): $'
-    Q1_BAD_INPUT DB 'ERROR: input must be a decimal number from 0 through 255.',13,10,'$'
-    Q1_SOURCE_LABEL DB 'DS:3000H (input)  = $'
-    Q1_DEST_LABEL DB 'DS:4000H (output) = $'
+    TITLE_TEXT  DB 13,10,'QUESTION 1 - BLOCK TRANSFER',13,10,'$'
+    PROMPT_TEXT DB 'Enter a byte (0-255): $'
+    OUTPUT_TEXT DB 'Output: $'
+    ERROR_TEXT  DB 'ERROR: enter a decimal number from 0 to 255.$'
+    NEWLINE     DB 13,10,'$'
+
+    ; DOS input buffer: maximum length, actual length, typed characters.
+    INPUT_BUFFER DB 4,0,5 DUP (0)
 
     ORG 3000H
 SOURCE_BYTES DB 10 DUP (?)
 
     ORG 4000H
-DEST_BYTES DB 10 DUP (00H)
+DEST_BYTES DB 10 DUP (0)
 DATASEG ENDS
 
 CODESEG SEGMENT PARA PUBLIC 'CODE'
@@ -29,139 +29,178 @@ START:
     MOV AX, DATASEG
     MOV DS, AX
 
-    LEA DX, Q1_TITLE
-    CALL PRINT_DOS
-    LEA DX, Q1_FORMULA
-    CALL PRINT_DOS
+    LEA DX, TITLE_TEXT
+    CALL PRINT_STRING
 
+    ; Read 10 decimal byte values into DS:3000H.
     MOV DI, 3000H
     MOV CX, 10
-    MOV BX, 1
-Q1_INPUT:
-    LEA DX, Q1_PROMPT
-    CALL PRINT_DOS
-    MOV AX, BX
-    CALL PRINT_UINT
-    LEA DX, Q1_PROMPT_TAIL
-    CALL PRINT_DOS
-    CALL READ_UINT8
-    JC Q1_BAD_EXIT
-    CALL PRINT_CRLF
+
+INPUT_LOOP:
+    LEA DX, PROMPT_TEXT
+    CALL PRINT_STRING
+    CALL READ_BYTE
+    JNC INPUT_OK
+    JMP BAD_INPUT
+
+INPUT_OK:
     MOV [DI], AL
     INC DI
-    INC BX
-    LOOP Q1_INPUT
+    CALL PRINT_NEWLINE
+    LOOP INPUT_LOOP
 
-    LEA DX, Q1_SOURCE_LABEL
-    MOV SI, 3000H
-    MOV CX, 10
-    CALL DISPLAY_ARRAY
-
+    ; This is the main part required by the question.
     MOV SI, 3000H
     MOV DI, 4000H
     MOV CX, 10
-Q1_TRANSFER:
+
+TRANSFER_LOOP:
     MOV AL, [SI]
     MOV BL, 5
     MUL BL
     ADD AX, 10
     MOV [DI], AL
+
     INC SI
     INC DI
-    LOOP Q1_TRANSFER
+    LOOP TRANSFER_LOOP
 
-    LEA DX, Q1_DEST_LABEL
+    ; Print the bytes stored at DS:4000H.
+    LEA DX, OUTPUT_TEXT
+    CALL PRINT_STRING
     MOV SI, 4000H
     MOV CX, 10
-    CALL DISPLAY_ARRAY
 
-    MOV AX, 4C00H
+OUTPUT_LOOP:
+    XOR AX, AX
+    MOV AL, [SI]
+    CALL PRINT_BYTE
+
+    MOV DL, ' '
+    MOV AH, 02H
     INT 21H
 
-Q1_BAD_EXIT:
-    CALL PRINT_CRLF
-    LEA DX, Q1_BAD_INPUT
-    CALL PRINT_DOS
+    INC SI
+    LOOP OUTPUT_LOOP
+    CALL PRINT_NEWLINE
+    JMP EXIT_OK
+
+BAD_INPUT:
+    LEA DX, ERROR_TEXT
+    CALL PRINT_STRING
+    CALL PRINT_NEWLINE
     MOV AX, 4C01H
     INT 21H
 
-; Prints a labelled byte array: DX = label offset, SI = array offset, CX = count.
-DISPLAY_ARRAY PROC NEAR
-    CALL PRINT_DOS
-    CALL PRINT_HEX_ARRAY
-    CALL PRINT_CRLF
-    RET
-DISPLAY_ARRAY ENDP
+EXIT_OK:
+    MOV AX, 4C00H
+    INT 21H
 
-; Reads a line containing an unsigned decimal number in the range 0..255.
-; Returns AX = value and CF clear, or CF set for invalid input.
-READ_UINT8 PROC NEAR
+; Read one decimal number from 0 through 255.
+; Return: AL = byte and CF = 0, or CF = 1 for invalid input.
+READ_BYTE PROC NEAR
     PUSH BX
     PUSH CX
     PUSH DX
     PUSH SI
-    XOR BX, BX
-    XOR SI, SI
-RU_READ:
-    MOV AH, 01H
+
+    LEA DX, INPUT_BUFFER
+    MOV AH, 0AH
     INT 21H
-    CMP AL, 13
-    JE RU_FINISH
-    CMP AL, 10
-    JNE RU_DIGIT
-    ; A redirected DOS text file uses CR/LF.  The preceding call consumes
-    ; CR, so ignore its remaining LF before reading the next number.
-    OR SI, SI
-    JZ RU_READ
-    JMP SHORT RU_FINISH
-RU_DIGIT:
+
+    MOV CL, INPUT_BUFFER[1]
+    XOR CH, CH
+    JCXZ RB_INVALID
+    CMP CX, 3
+    JA RB_INVALID
+
+    LEA SI, INPUT_BUFFER[2]
+    XOR BX, BX
+
+RB_NEXT_DIGIT:
+    MOV AL, [SI]
     CMP AL, '0'
-    JB RU_BAD
+    JB RB_INVALID
     CMP AL, '9'
-    JA RU_BAD
+    JA RB_INVALID
+
     MOV DL, AL
     SUB DL, '0'
     XOR DH, DH
+
+    ; New value = old value * 10 + new digit.
     MOV AX, BX
     SHL AX, 1
-    MOV CX, AX
+    MOV BX, AX
     SHL AX, 1
     SHL AX, 1
-    ADD AX, CX
+    ADD AX, BX
     ADD AX, DX
+
     CMP AX, 255
-    JA RU_BAD
+    JA RB_INVALID
     MOV BX, AX
     INC SI
-    JMP SHORT RU_READ
-RU_FINISH:
-    OR SI, SI
-    JZ RU_INVALID
+    LOOP RB_NEXT_DIGIT
+
     MOV AX, BX
     CLC
-    JMP SHORT RU_RETURN
-RU_BAD:
-    CMP AL, 13
-    JE RU_INVALID
-    CMP AL, 10
-    JE RU_INVALID
-RU_CONSUME:
-    MOV AH, 01H
-    INT 21H
-    CMP AL, 13
-    JE RU_INVALID
-    CMP AL, 10
-    JNE RU_CONSUME
-RU_INVALID:
+    JMP SHORT RB_RETURN
+
+RB_INVALID:
     STC
-RU_RETURN:
+
+RB_RETURN:
     POP SI
     POP DX
     POP CX
     POP BX
     RET
-READ_UINT8 ENDP
+READ_BYTE ENDP
 
-    INCLUDE COMMON.INC
+; Print the unsigned byte in AX as decimal.
+PRINT_BYTE PROC NEAR
+    PUSH AX
+    PUSH BX
+    PUSH CX
+    PUSH DX
+
+    XOR CX, CX
+    MOV BX, 10
+
+PB_DIVIDE:
+    XOR DX, DX
+    DIV BX
+    PUSH DX
+    INC CX
+    OR AX, AX
+    JNZ PB_DIVIDE
+
+PB_PRINT:
+    POP DX
+    ADD DL, '0'
+    MOV AH, 02H
+    INT 21H
+    LOOP PB_PRINT
+
+    POP DX
+    POP CX
+    POP BX
+    POP AX
+    RET
+PRINT_BYTE ENDP
+
+PRINT_STRING PROC NEAR
+    MOV AH, 09H
+    INT 21H
+    RET
+PRINT_STRING ENDP
+
+PRINT_NEWLINE PROC NEAR
+    LEA DX, NEWLINE
+    CALL PRINT_STRING
+    RET
+PRINT_NEWLINE ENDP
+
 CODESEG ENDS
 END START

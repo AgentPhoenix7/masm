@@ -34,19 +34,21 @@ q4
 ### Q1.ASM - transformed block transfer
 
 - Reserves the source at offset `DS:3000H` and destination at `DS:4000H`.
-- Reads ten unsigned decimal bytes and stores them at `DS:3000H`.
+- Reads ten decimal byte values (`0` through `255`) and stores them at
+  `DS:3000H`.
 - Applies `(value * 5) + 10` before storing each destination byte.
-- Displays the source bytes at `DS:3000H` and the results at `DS:4000H`.
+- Prints the ten transformed values in decimal.
+- If a transformed value exceeds `255`, the destination stores its low byte.
 
 Expected destination:
 
 ```text
-0F 14 19 1E 23 28 2D 32 37 3C
+10 15 55 60 135 255 4 254 242 5
 ```
 
-Run `q1` to enter ten values interactively. For a repeatable demonstration
-using the values 1 through 10, run `q1 < q1_input.txt`. `EVIDENCE/Q1RUN.TXT`
-contains the output from that fixture.
+Run `q1`, enter one value at each prompt, and press Enter. The verified run
+uses `0`, `1`, `9`, `10`, `25`, `49`, `50`, `100`, `200`, and `255`, entered
+as keyboard input with `xdotool`. `EVIDENCE/Q1RUN.TXT` contains that run.
 
 ### Q2.ASM - 20-number zig-zag array
 

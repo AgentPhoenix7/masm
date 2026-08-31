@@ -1,7 +1,7 @@
 
 QUESTION 4 - BASIC CALCULATOR
 Enter unsigned decimal operands from 0 through 255.
-First operand: 
-Operator (+, -, *, /): 
-Second operand: 
+First operand: 29
+Operator (+, -, *, /): /
+Second operand: 4
 Quotient: 7  Remainder: 1

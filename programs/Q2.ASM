@@ -16,26 +16,25 @@ DATASEG SEGMENT PARA PUBLIC 'DATA'
     ; DOS function 0AH buffer: maximum length, actual length, characters.
     ; Empirically verified against this authentic DOSBox 0.74-3 / MASM 5.10
     ; environment (isolated minimal-repro test, not just this program):
-    ; typing exactly maxlen characters (e.g. maxlen=3 with a 3-digit entry
-    ; such as "255") never returns from INT 21H/AH=0AH here, even after
-    ; extra Enter presses and multi-second waits, while entering fewer than
-    ; maxlen characters (e.g. two digits) completes normally. Setting
-    ; maxlen=4 leaves headroom so a 3-digit entry never hits that stuck
-    ; boundary. The char area is sized maxlen+1 (5) to also hold the CR
-    ; DOS writes after the typed characters.
-    INPUT_BUFFER  DB 4,0,5 DUP (?)
+    ; typing exactly maxlen characters never returns from INT 21H/AH=0AH
+    ; here, even after extra Enter presses and multi-second waits, while
+    ; entering fewer than maxlen characters completes normally. Valid input
+    ; is 1-3 decimal digits, so maxlen=6 leaves generous headroom (+3 over
+    ; the longest valid input), matching Q4's identical INPUT_BUFFER. The
+    ; char area is sized maxlen+1 (7) to also hold the CR DOS writes after
+    ; the typed characters.
+    INPUT_BUFFER  DB 6,0,7 DUP (0)
 
     ORG 4000H
 ZIGZAG_ARRAY DB 20 DUP (0)
 DATASEG ENDS
 
 CODESEG SEGMENT PARA PUBLIC 'CODE'
-    ASSUME CS:CODESEG, DS:DATASEG, ES:DATASEG, SS:STACKSEG
+    ASSUME CS:CODESEG, DS:DATASEG, SS:STACKSEG
 
 START:
     MOV AX, DATASEG
     MOV DS, AX
-    MOV ES, AX
 
     LEA DX, Q2_TITLE
     CALL PRINT_STRING
@@ -56,6 +55,7 @@ INPUT_OK:
     LOOP INPUT_LOOP
     JMP SHORT SHOW_ORIGINAL
 BAD_INPUT:
+    CALL PRINT_NEWLINE
     LEA DX, BAD_TEXT
     CALL PRINT_STRING
     JMP INPUT_LOOP
@@ -130,7 +130,7 @@ PRINT_NEWLINE PROC NEAR
 PRINT_NEWLINE ENDP
 
 ; Read one decimal byte with DOS buffered keyboard input.
-; Returns: AL = value and CF clear, or CF set for invalid input.
+; Returns: AX = value and CF clear, or CF set for invalid input.
 ; Preserves: BX, CX, DX, SI, and DI.
 READ_BYTE PROC NEAR
     PUSH BX

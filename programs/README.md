@@ -28,7 +28,7 @@ runall
 pauses at each program's own prompts and does not redirect input from any
 fixture file.
 
-The calculator can also be used interactively:
+Run the calculator interactively:
 
 ```dos
 q4
@@ -169,3 +169,9 @@ window screenshots are stored in `screenshots/` at the repository root
 All five executables were assembled and linked successfully in DOSBox 0.74-3.
 The assembler reported zero warning errors and zero severe errors for every
 source file.
+
+Note: DOS's buffered keyboard input in this DOSBox/MASM environment can hang
+if you type an unusually long, clearly invalid entry at any prompt; if this
+happens, restart DOSBox. Every program's input buffer is sized with generous
+headroom so this should not occur with any reasonable or even mistyped
+input.

@@ -170,7 +170,7 @@ Q4_EXIT_OK:
 ; Read one decimal byte with DOS buffered keyboard input.
 ; Accepts 1 to 3 decimal digits, rejects non-digits and values above 255.
 ; Returns: AX = value and CF clear, or CF set for invalid input.
-; Preserves: BX, CX, DX, and SI.
+; Preserves: BX, CX, DX, SI, and DI.
 READ_BYTE PROC NEAR
     PUSH BX
     PUSH CX

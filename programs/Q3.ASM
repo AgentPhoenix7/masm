@@ -9,7 +9,7 @@ STACKSEG ENDS
 DATASEG SEGMENT PARA PUBLIC 'DATA'
     Q3_TITLE      DB 13,10,'QUESTION 3 - HEX BYTE TO ASCII CHARACTER',13,10,'$'
     PROMPT_TEXT   DB 'Enter a hex byte (00-FF): $'
-    BAD_TEXT      DB 'Invalid input. Enter exactly two hex digits (0-9, A-F).',13,10,'$'
+    BAD_TEXT      DB 'Invalid input. Enter exactly two hex digits (0-9, A-F, a-f).',13,10,'$'
     HEX_LABEL     DB 'Hex value: $'
     ASCII_LABEL   DB 'ASCII value: $'
     NOT_PRINTABLE_TEXT DB 'not printable$'

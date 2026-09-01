@@ -48,8 +48,8 @@ c4a6b9870da51719df3cfab4b46f5bc0053ee3a00da10dc7767e966cba0a0c6c  DEBUG.COM
 From DOSBox:
 
 ```dos
-mount c /home/agntdrgn/masm
-mount t /home/agntdrgn/masm/dos-tools
+mount c /home/S2410501070/masm
+mount t /home/S2410501070/masm/dos-tools
 c:
 path t:\
 masm source.asm;

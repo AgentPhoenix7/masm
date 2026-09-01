@@ -150,7 +150,7 @@ HN_CHECK_UPPER:
     JB HN_BAD
     CMP AL, 'F'
     JA HN_CHECK_LOWER
-    SUB AL, 'A' - 10
+    SUB AL, 'A' - 10      ; Convert 'A'-'F' to 10-15
     CLC
     RET
 HN_CHECK_LOWER:

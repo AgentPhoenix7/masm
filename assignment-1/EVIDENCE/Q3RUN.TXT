@@ -1,0 +1,5 @@
+
+QUESTION 3 - HEX BYTE TO ASCII CHARACTER
+Enter a hex byte (00-FF): 68
+Hex value: 68H
+ASCII value: h

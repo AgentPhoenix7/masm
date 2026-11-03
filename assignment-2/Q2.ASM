@@ -1,0 +1,725 @@
+; Q2. Design and implement a simple command-line shell emulator using MASM (Microsoft Macro Assembler) that accepts user commands from the terminal and performs appropriate actions. The shell must interpret the following commands:
+; a. DIR - Display a list of mock file names (simulate file listing)
+; b. TYPE <filename> - Display the contents of the specified file
+; c. COPY <source> <destination> - Copy the contents of one file to another
+; d. EXIT - Exit the shell interface and terminate the program
+; e. The emulator should prompt the user for input, parse the entered command, and invoke the appropriate function to operate. All actions should be implemented using MASM and DOS system interrupts (INT 21h) where applicable.
+
+; Simple command-line shell emulator for 8086 DOS
+; MASM 5.x compatible
+;
+; Commands:
+;   DIR
+;   TYPE <filename>
+;   COPY <source> <destination>
+;   EXIT
+
+STACKSEG SEGMENT PARA STACK 'STACK'
+    DW 128 DUP (?)
+STACKSEG ENDS
+
+CMD_NONE EQU 0
+CMD_DIR  EQU 1
+CMD_TYPE EQU 2
+CMD_COPY EQU 3
+CMD_EXIT EQU 4
+
+DATASEG SEGMENT PARA PUBLIC 'DATA'
+    TITLE_MSG       DB 13,10,'SIMPLE DOS SHELL',13,10
+                    DB 'Commands: DIR, TYPE <file>, COPY <source> <destination>, EXIT',13,10,'$'
+    PROMPT_MSG      DB 13,10,'SHELL> $'
+    DIR_TITLE_MSG   DB 'Directory contents:',13,10,'$'
+    NO_FILES_MSG    DB 'No files found.',13,10,'$'
+    INVALID_MSG     DB 'Invalid command or syntax.',13,10,'$'
+    SAME_FILE_MSG   DB 'Source and destination cannot be the same file.',13,10,'$'
+    OPEN_ERROR_MSG  DB 'Error: cannot open source file.',13,10,'$'
+    CREATE_ERR_MSG  DB 'Error: cannot create destination file.',13,10,'$'
+    READ_ERROR_MSG  DB 'Error: cannot read file.',13,10,'$'
+    WRITE_ERROR_MSG DB 'Error: cannot write file.',13,10,'$'
+    COPY_OK_MSG     DB 'File copied successfully.',13,10,'$'
+    GOODBYE_MSG     DB 'Exiting shell.',13,10,'$'
+    NEWLINE         DB 13,10,'$'
+
+    CMD_DIR_TEXT    DB 'DIR',0
+    CMD_TYPE_TEXT   DB 'TYPE',0
+    CMD_COPY_TEXT   DB 'COPY',0
+    CMD_EXIT_TEXT   DB 'EXIT',0
+    ALL_FILES       DB '*.*',0
+
+    ; DOS function 0Ah input buffer:
+    ; maximum length, actual length, characters followed by CR.
+    COMMAND_BUFFER  DB 126,0,127 DUP (0)
+
+    COMMAND_TOKEN   DB 16 DUP (0)
+    SOURCE_NAME     DB 64 DUP (0)
+    DEST_NAME       DB 64 DUP (0)
+
+    COMMAND_ID      DB CMD_NONE
+    PARSE_ERROR     DB 0
+
+    SOURCE_HANDLE   DW 0
+    DEST_HANDLE     DW 0
+    READ_COUNT      DW 0
+
+    IO_BUFFER       DB 128 DUP (0)
+    DTA_BUFFER      DB 128 DUP (0)
+DATASEG ENDS
+
+CODESEG SEGMENT PARA PUBLIC 'CODE'
+    ASSUME CS:CODESEG, DS:DATASEG, SS:STACKSEG
+
+MAIN PROC
+    MOV AX, DATASEG
+    MOV DS, AX
+    MOV ES, AX
+
+    LEA DX, TITLE_MSG
+    CALL PRINT_STRING
+
+SHELL_LOOP:
+    LEA DX, PROMPT_MSG
+    CALL PRINT_STRING
+
+    CALL READ_COMMAND
+    CALL PARSE_COMMAND
+
+    CMP AL, CMD_DIR
+    JE RUN_DIR
+    CMP AL, CMD_TYPE
+    JE RUN_TYPE
+    CMP AL, CMD_COPY
+    JE RUN_COPY
+    CMP AL, CMD_EXIT
+    JE RUN_EXIT
+
+    CMP PARSE_ERROR, 0
+    JE SHELL_LOOP
+    CMP PARSE_ERROR, 2
+    JE SHOW_SAME_FILE
+
+    LEA DX, INVALID_MSG
+    CALL PRINT_STRING
+    JMP SHELL_LOOP
+
+SHOW_SAME_FILE:
+    LEA DX, SAME_FILE_MSG
+    CALL PRINT_STRING
+    JMP SHELL_LOOP
+
+RUN_DIR:
+    CALL DO_DIR
+    JMP SHELL_LOOP
+
+RUN_TYPE:
+    CALL DO_TYPE
+    JMP SHELL_LOOP
+
+RUN_COPY:
+    CALL DO_COPY
+    JMP SHELL_LOOP
+
+RUN_EXIT:
+    LEA DX, GOODBYE_MSG
+    CALL PRINT_STRING
+
+    MOV AX, 4C00H
+    INT 21H
+MAIN ENDP
+
+; Reads one command line from the keyboard.
+READ_COMMAND PROC NEAR
+    PUSH AX
+    PUSH BX
+    PUSH DX
+    PUSH SI
+
+    MOV COMMAND_BUFFER[1], 0
+    LEA DX, COMMAND_BUFFER
+    MOV AH, 0AH
+    INT 21H
+
+    ; Replace the final carriage return with an ASCIIZ terminator.
+    XOR BX, BX
+    MOV BL, COMMAND_BUFFER[1]
+    LEA SI, COMMAND_BUFFER[2]
+    ADD SI, BX
+    MOV BYTE PTR [SI], 0
+
+    POP SI
+    POP DX
+    POP BX
+    POP AX
+    RET
+READ_COMMAND ENDP
+
+; Parses the command line.
+; Returns AL = CMD_* and sets PARSE_ERROR:
+;   0 = no error/blank line, 1 = invalid syntax, 2 = same COPY file.
+PARSE_COMMAND PROC NEAR
+    PUSH BX
+    PUSH CX
+    PUSH DX
+    PUSH SI
+    PUSH DI
+
+    MOV COMMAND_ID, CMD_NONE
+    MOV PARSE_ERROR, 0
+
+    LEA SI, COMMAND_BUFFER[2]
+    LEA DI, COMMAND_TOKEN
+    MOV CX, 15
+    CALL GET_TOKEN
+    CMP AL, 0
+    JE PARSE_FINISHED
+
+    LEA SI, COMMAND_TOKEN
+    CALL UPPERCASE_STRING
+
+    LEA SI, COMMAND_TOKEN
+    LEA DI, CMD_DIR_TEXT
+    CALL STR_EQUAL
+    CMP AL, 1
+    JE PARSE_DIR
+
+    LEA SI, COMMAND_TOKEN
+    LEA DI, CMD_TYPE_TEXT
+    CALL STR_EQUAL
+    CMP AL, 1
+    JE PARSE_TYPE
+
+    LEA SI, COMMAND_TOKEN
+    LEA DI, CMD_COPY_TEXT
+    CALL STR_EQUAL
+    CMP AL, 1
+    JE PARSE_COPY
+
+    LEA SI, COMMAND_TOKEN
+    LEA DI, CMD_EXIT_TEXT
+    CALL STR_EQUAL
+    CMP AL, 1
+    JE PARSE_EXIT
+
+    JMP PARSE_INVALID
+
+PARSE_DIR:
+    LEA SI, COMMAND_BUFFER[2]
+    CALL MOVE_PAST_COMMAND
+    CALL HAS_MORE_TEXT
+    CMP AL, 1
+    JE PARSE_INVALID
+    MOV COMMAND_ID, CMD_DIR
+    JMP PARSE_FINISHED
+
+PARSE_TYPE:
+    LEA SI, COMMAND_BUFFER[2]
+    CALL MOVE_PAST_COMMAND
+
+    LEA DI, SOURCE_NAME
+    MOV CX, 63
+    CALL GET_TOKEN
+    CMP AL, 0
+    JE PARSE_INVALID
+
+    CALL HAS_MORE_TEXT
+    CMP AL, 1
+    JE PARSE_INVALID
+
+    MOV COMMAND_ID, CMD_TYPE
+    JMP PARSE_FINISHED
+
+PARSE_COPY:
+    LEA SI, COMMAND_BUFFER[2]
+    CALL MOVE_PAST_COMMAND
+
+    LEA DI, SOURCE_NAME
+    MOV CX, 63
+    CALL GET_TOKEN
+    CMP AL, 0
+    JE PARSE_INVALID
+
+    LEA DI, DEST_NAME
+    MOV CX, 63
+    CALL GET_TOKEN
+    CMP AL, 0
+    JE PARSE_INVALID
+
+    CALL HAS_MORE_TEXT
+    CMP AL, 1
+    JE PARSE_INVALID
+
+    LEA SI, SOURCE_NAME
+    LEA DI, DEST_NAME
+    CALL SAME_NAMES
+    CMP AL, 1
+    JE PARSE_SAME_FILE
+
+    MOV COMMAND_ID, CMD_COPY
+    JMP PARSE_FINISHED
+
+PARSE_EXIT:
+    LEA SI, COMMAND_BUFFER[2]
+    CALL MOVE_PAST_COMMAND
+    CALL HAS_MORE_TEXT
+    CMP AL, 1
+    JE PARSE_INVALID
+    MOV COMMAND_ID, CMD_EXIT
+    JMP PARSE_FINISHED
+
+PARSE_INVALID:
+    MOV PARSE_ERROR, 1
+    JMP PARSE_FINISHED
+
+PARSE_SAME_FILE:
+    MOV PARSE_ERROR, 2
+
+PARSE_FINISHED:
+    POP DI
+    POP SI
+    POP DX
+    POP CX
+    POP BX
+    MOV AL, COMMAND_ID
+    RET
+PARSE_COMMAND ENDP
+
+; Advances SI past leading spaces and the command word.
+MOVE_PAST_COMMAND PROC NEAR
+MPC_SKIP_SPACES:
+    CMP BYTE PTR [SI], ' '
+    JNE MPC_SKIP_WORD
+    INC SI
+    JMP MPC_SKIP_SPACES
+
+MPC_SKIP_WORD:
+    CMP BYTE PTR [SI], 0
+    JE MPC_DONE
+    CMP BYTE PTR [SI], ' '
+    JE MPC_DONE
+    INC SI
+    JMP MPC_SKIP_WORD
+
+MPC_DONE:
+    RET
+MOVE_PAST_COMMAND ENDP
+
+; Copies the next space-delimited token from DS:SI to DS:DI.
+; CX is the maximum number of characters stored.
+; Returns AL = 1 when a token exists, otherwise AL = 0.
+GET_TOKEN PROC NEAR
+    PUSH BX
+
+GET_SKIP_SPACES:
+    CMP BYTE PTR [SI], ' '
+    JNE GET_START
+    INC SI
+    JMP GET_SKIP_SPACES
+
+GET_START:
+    CMP BYTE PTR [SI], 0
+    JE GET_NONE
+
+    XOR BX, BX
+
+GET_COPY:
+    MOV AL, [SI]
+    CMP AL, 0
+    JE GET_DONE
+    CMP AL, ' '
+    JE GET_DONE
+
+    CMP BX, CX
+    JAE GET_CONSUME
+    MOV [DI+BX], AL
+    INC BX
+
+GET_CONSUME:
+    INC SI
+    JMP GET_COPY
+
+GET_DONE:
+    MOV BYTE PTR [DI+BX], 0
+    MOV AL, 1
+    JMP GET_RETURN
+
+GET_NONE:
+    MOV BYTE PTR [DI], 0
+    MOV AL, 0
+
+GET_RETURN:
+    POP BX
+    RET
+GET_TOKEN ENDP
+
+; Returns AL = 1 if non-space text remains at DS:SI.
+HAS_MORE_TEXT PROC NEAR
+HMT_SKIP:
+    CMP BYTE PTR [SI], ' '
+    JNE HMT_CHECK
+    INC SI
+    JMP HMT_SKIP
+
+HMT_CHECK:
+    CMP BYTE PTR [SI], 0
+    JE HMT_NONE
+    MOV AL, 1
+    RET
+
+HMT_NONE:
+    MOV AL, 0
+    RET
+HAS_MORE_TEXT ENDP
+
+; Converts an ASCIIZ string at DS:SI to uppercase.
+UPPERCASE_STRING PROC NEAR
+    PUSH AX
+    PUSH SI
+
+UPPER_LOOP:
+    MOV AL, [SI]
+    CMP AL, 0
+    JE UPPER_DONE
+    CMP AL, 'a'
+    JB UPPER_NEXT
+    CMP AL, 'z'
+    JA UPPER_NEXT
+    SUB BYTE PTR [SI], 20H
+
+UPPER_NEXT:
+    INC SI
+    JMP UPPER_LOOP
+
+UPPER_DONE:
+    POP SI
+    POP AX
+    RET
+UPPERCASE_STRING ENDP
+
+; Compares ASCIIZ strings DS:SI and DS:DI exactly.
+; Returns AL = 1 when equal, otherwise AL = 0.
+STR_EQUAL PROC NEAR
+    PUSH BX
+    PUSH SI
+    PUSH DI
+
+STR_EQUAL_LOOP:
+    MOV AL, [SI]
+    MOV BL, [DI]
+    CMP AL, BL
+    JNE STR_NOT_EQUAL
+    CMP AL, 0
+    JE STR_IS_EQUAL
+    INC SI
+    INC DI
+    JMP STR_EQUAL_LOOP
+
+STR_IS_EQUAL:
+    MOV AL, 1
+    JMP STR_EQUAL_DONE
+
+STR_NOT_EQUAL:
+    MOV AL, 0
+
+STR_EQUAL_DONE:
+    POP DI
+    POP SI
+    POP BX
+    RET
+STR_EQUAL ENDP
+
+; Compares two filenames case-insensitively.
+SAME_NAMES PROC NEAR
+    PUSH BX
+    PUSH DX
+    PUSH SI
+    PUSH DI
+
+SAME_LOOP:
+    MOV AL, [SI]
+    MOV DL, [DI]
+
+    CMP AL, 'a'
+    JB SAME_FIRST_READY
+    CMP AL, 'z'
+    JA SAME_FIRST_READY
+    SUB AL, 20H
+
+SAME_FIRST_READY:
+    CMP DL, 'a'
+    JB SAME_SECOND_READY
+    CMP DL, 'z'
+    JA SAME_SECOND_READY
+    SUB DL, 20H
+
+SAME_SECOND_READY:
+    CMP AL, DL
+    JNE NAMES_DIFFER
+    CMP AL, 0
+    JE NAMES_EQUAL
+    INC SI
+    INC DI
+    JMP SAME_LOOP
+
+NAMES_EQUAL:
+    MOV AL, 1
+    JMP SAME_DONE
+
+NAMES_DIFFER:
+    MOV AL, 0
+
+SAME_DONE:
+    POP DI
+    POP SI
+    POP DX
+    POP BX
+    RET
+SAME_NAMES ENDP
+
+; Displays real files from the current DOS directory.
+DO_DIR PROC NEAR
+    PUSH AX
+    PUSH CX
+    PUSH DX
+
+    LEA DX, DIR_TITLE_MSG
+    CALL PRINT_STRING
+
+    LEA DX, DTA_BUFFER
+    MOV AH, 1AH
+    INT 21H
+
+    LEA DX, ALL_FILES
+    XOR CX, CX
+    MOV AH, 4EH
+    INT 21H
+    JC DIR_EMPTY
+
+DIR_PRINT_NEXT:
+    LEA DX, DTA_BUFFER[30]
+    CALL PRINT_ZSTRING
+    LEA DX, NEWLINE
+    CALL PRINT_STRING
+
+    MOV AH, 4FH
+    INT 21H
+    JNC DIR_PRINT_NEXT
+    JMP DIR_DONE
+
+DIR_EMPTY:
+    LEA DX, NO_FILES_MSG
+    CALL PRINT_STRING
+
+DIR_DONE:
+    POP DX
+    POP CX
+    POP AX
+    RET
+DO_DIR ENDP
+
+; Displays the contents of SOURCE_NAME.
+DO_TYPE PROC NEAR
+    PUSH AX
+    PUSH BX
+    PUSH CX
+    PUSH DX
+
+    LEA DX, SOURCE_NAME
+    MOV AX, 3D00H
+    INT 21H
+    JC TYPE_OPEN_ERROR
+    MOV SOURCE_HANDLE, AX
+
+TYPE_READ_LOOP:
+    MOV BX, SOURCE_HANDLE
+    LEA DX, IO_BUFFER
+    MOV CX, 128
+    MOV AH, 3FH
+    INT 21H
+    JC TYPE_READ_ERROR
+    CMP AX, 0
+    JE TYPE_COMPLETE
+
+    MOV CX, AX
+    MOV BX, 1
+    LEA DX, IO_BUFFER
+    MOV AH, 40H
+    INT 21H
+    JC TYPE_WRITE_ERROR
+    CMP AX, CX
+    JNE TYPE_WRITE_ERROR
+    JMP TYPE_READ_LOOP
+
+TYPE_COMPLETE:
+    MOV BX, SOURCE_HANDLE
+    MOV AH, 3EH
+    INT 21H
+    LEA DX, NEWLINE
+    CALL PRINT_STRING
+    JMP TYPE_DONE
+
+TYPE_READ_ERROR:
+    MOV BX, SOURCE_HANDLE
+    MOV AH, 3EH
+    INT 21H
+    LEA DX, READ_ERROR_MSG
+    CALL PRINT_STRING
+    JMP TYPE_DONE
+
+TYPE_WRITE_ERROR:
+    MOV BX, SOURCE_HANDLE
+    MOV AH, 3EH
+    INT 21H
+    LEA DX, WRITE_ERROR_MSG
+    CALL PRINT_STRING
+    JMP TYPE_DONE
+
+TYPE_OPEN_ERROR:
+    LEA DX, OPEN_ERROR_MSG
+    CALL PRINT_STRING
+
+TYPE_DONE:
+    POP DX
+    POP CX
+    POP BX
+    POP AX
+    RET
+DO_TYPE ENDP
+
+; Copies SOURCE_NAME to DEST_NAME using real DOS files.
+DO_COPY PROC NEAR
+    PUSH AX
+    PUSH BX
+    PUSH CX
+    PUSH DX
+
+    LEA DX, SOURCE_NAME
+    MOV AX, 3D00H
+    INT 21H
+    JC COPY_OPEN_ERROR
+    MOV SOURCE_HANDLE, AX
+
+    LEA DX, DEST_NAME
+    XOR CX, CX
+    MOV AH, 3CH
+    INT 21H
+    JC COPY_CREATE_ERROR
+    MOV DEST_HANDLE, AX
+
+COPY_READ_LOOP:
+    MOV BX, SOURCE_HANDLE
+    LEA DX, IO_BUFFER
+    MOV CX, 128
+    MOV AH, 3FH
+    INT 21H
+    JC COPY_READ_ERROR
+
+    CMP AX, 0
+    JE COPY_COMPLETE
+    MOV READ_COUNT, AX
+
+    MOV BX, DEST_HANDLE
+    MOV CX, READ_COUNT
+    LEA DX, IO_BUFFER
+    MOV AH, 40H
+    INT 21H
+    JC COPY_WRITE_ERROR
+    CMP AX, READ_COUNT
+    JNE COPY_WRITE_ERROR
+    JMP COPY_READ_LOOP
+
+COPY_COMPLETE:
+    CALL CLOSE_COPY_HANDLES
+    LEA DX, COPY_OK_MSG
+    CALL PRINT_STRING
+    JMP COPY_DONE
+
+COPY_READ_ERROR:
+    CALL CLOSE_COPY_HANDLES
+    LEA DX, READ_ERROR_MSG
+    CALL PRINT_STRING
+    JMP COPY_DONE
+
+COPY_WRITE_ERROR:
+    CALL CLOSE_COPY_HANDLES
+    LEA DX, WRITE_ERROR_MSG
+    CALL PRINT_STRING
+    JMP COPY_DONE
+
+COPY_CREATE_ERROR:
+    MOV BX, SOURCE_HANDLE
+    MOV AH, 3EH
+    INT 21H
+    LEA DX, CREATE_ERR_MSG
+    CALL PRINT_STRING
+    JMP COPY_DONE
+
+COPY_OPEN_ERROR:
+    LEA DX, OPEN_ERROR_MSG
+    CALL PRINT_STRING
+
+COPY_DONE:
+    POP DX
+    POP CX
+    POP BX
+    POP AX
+    RET
+DO_COPY ENDP
+
+CLOSE_COPY_HANDLES PROC NEAR
+    PUSH AX
+    PUSH BX
+
+    MOV BX, DEST_HANDLE
+    MOV AH, 3EH
+    INT 21H
+
+    MOV BX, SOURCE_HANDLE
+    MOV AH, 3EH
+    INT 21H
+
+    POP BX
+    POP AX
+    RET
+CLOSE_COPY_HANDLES ENDP
+
+; Prints a '$'-terminated string at DS:DX.
+PRINT_STRING PROC NEAR
+    PUSH AX
+    MOV AH, 09H
+    INT 21H
+    POP AX
+    RET
+PRINT_STRING ENDP
+
+; Prints an ASCIIZ string at DS:DX to standard output.
+PRINT_ZSTRING PROC NEAR
+    PUSH AX
+    PUSH BX
+    PUSH CX
+    PUSH DX
+    PUSH SI
+
+    MOV SI, DX
+    XOR CX, CX
+
+PZS_COUNT:
+    CMP BYTE PTR [SI], 0
+    JE PZS_WRITE
+    INC SI
+    INC CX
+    JMP PZS_COUNT
+
+PZS_WRITE:
+    MOV BX, 1
+    MOV AH, 40H
+    INT 21H
+
+    POP SI
+    POP DX
+    POP CX
+    POP BX
+    POP AX
+    RET
+PRINT_ZSTRING ENDP
+
+CODESEG ENDS
+END MAIN

@@ -1,0 +1,5 @@
+
+QUESTION 3 - HEX BYTE TO ASCII CHARACTER
+Enter a hex byte (00-FF): 0A
+Hex value: 0AH
+ASCII value: not printable

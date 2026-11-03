@@ -1,0 +1,329 @@
+Microsoft (R) Macro Assembler Version 5.10                  8/31/26 15:09:25
+                                                             Page     1-1
+
+
+				; Question 1 - beginner version
+				; Read 10 bytes, calculate (value * 5) + 10, an
+				d transfer the results.
+				
+ 0000				STACKSEG SEGMENT PARA STACK 'STACK'
+ 0000  0080[			    DW 128 DUP (?)
+	   ????			
+			 ]	
+				
+ 0100				STACKSEG ENDS
+				
+ 0000				DATASEG SEGMENT PARA PUBLIC 'DATA'
+ 0000  0D 0A 51 55 45 53	    TITLE_TEXT  DB 13,10,'QUESTION 1 - BLOCK TR
+				ANSFER',13,10,'$'
+       54 49 4F 4E 20 31	
+       20 2D 20 42 4C 4F	
+       43 4B 20 54 52 41	
+       4E 53 46 45 52 0D	
+       0A 24			
+ 0020  45 6E 74 65 72 20	    PROMPT_TEXT DB 'Enter a byte (0-255): $'
+       61 20 62 79 74 65	
+       20 28 30 2D 32 35	
+       35 29 3A 20 24		
+ 0037  4F 75 74 70 75 74	    OUTPUT_TEXT DB 'Output: $'
+       3A 20 24			
+ 0040  45 52 52 4F 52 3A	    ERROR_TEXT  DB 'ERROR: enter a decimal numb
+				er from 0 to 255.$'
+       20 65 6E 74 65 72	
+       20 61 20 64 65 63	
+       69 6D 61 6C 20 6E	
+       75 6D 62 65 72 20	
+       66 72 6F 6D 20 30	
+       20 74 6F 20 32 35	
+       35 2E 24			
+ 006D  0D 0A 24			    NEWLINE     DB 13,10,'$'
+				
+				    ; DOS input buffer: maximum length, actual 
+				length, typed characters.
+ 0070  04 00			    INPUT_BUFFER DB 4,0,5 DUP (0)
+       0005[			
+	   00			
+			 ]	
+				
+				
+ 3000				    ORG 3000H
+ 3000  000A[			SOURCE_BYTES DB 10 DUP (?)
+	   ??			
+			 ]	
+				
+				
+ 4000				    ORG 4000H
+ 4000  000A[			DEST_BYTES DB 10 DUP (0)
+	   00			
+			 ]	
+Microsoft (R) Macro Assembler Version 5.10                  8/31/26 15:09:25
+                                                             Page     1-2
+
+
+				
+ 400A				DATASEG ENDS
+				
+ 0000				CODESEG SEGMENT PARA PUBLIC 'CODE'
+				    ASSUME CS:CODESEG, DS:DATASEG, SS:STACKSEG
+				
+ 0000				START:
+ 0000  B8 ---- R		    MOV AX, DATASEG
+ 0003  8E D8			    MOV DS, AX
+				
+ 0005  8D 16 0000 R		    LEA DX, TITLE_TEXT
+ 0009  E8 00ED R		    CALL PRINT_STRING
+				
+				    ; Read 10 decimal byte values into DS:3000H
+				.
+ 000C  BF 3000			    MOV DI, 3000H
+ 000F  B9 000A			    MOV CX, 10
+				
+ 0012				INPUT_LOOP:
+ 0012  8D 16 0020 R		    LEA DX, PROMPT_TEXT
+ 0016  E8 00ED R		    CALL PRINT_STRING
+ 0019  E8 0078 R		    CALL READ_BYTE
+ 001C  73 03			    JNC INPUT_OK
+ 001E  EB 44 90			    JMP BAD_INPUT
+				
+ 0021				INPUT_OK:
+ 0021  88 05			    MOV [DI], AL
+ 0023  47			    INC DI
+ 0024  E8 00F2 R		    CALL PRINT_NEWLINE
+ 0027  E2 E9			    LOOP INPUT_LOOP
+				
+				    ; This is the main part required by the que
+				stion.
+ 0029  BE 3000			    MOV SI, 3000H
+ 002C  BF 4000			    MOV DI, 4000H
+ 002F  B9 000A			    MOV CX, 10
+				
+ 0032				TRANSFER_LOOP:
+ 0032  8A 04			    MOV AL, [SI]
+ 0034  B3 05			    MOV BL, 5
+ 0036  F6 E3			    MUL BL
+ 0038  05 000A			    ADD AX, 10
+ 003B  88 05			    MOV [DI], AL
+				
+ 003D  46			    INC SI
+ 003E  47			    INC DI
+ 003F  E2 F1			    LOOP TRANSFER_LOOP
+				
+				    ; Print the bytes stored at DS:4000H.
+ 0041  8D 16 0037 R		    LEA DX, OUTPUT_TEXT
+ 0045  E8 00ED R		    CALL PRINT_STRING
+ 0048  BE 4000			    MOV SI, 4000H
+ 004B  B9 000A			    MOV CX, 10
+				
+Microsoft (R) Macro Assembler Version 5.10                  8/31/26 15:09:25
+                                                             Page     1-3
+
+
+ 004E				OUTPUT_LOOP:
+ 004E  33 C0			    XOR AX, AX
+ 0050  8A 04			    MOV AL, [SI]
+ 0052  E8 00CB R		    CALL PRINT_BYTE
+				
+ 0055  B2 20			    MOV DL, ' '
+ 0057  B4 02			    MOV AH, 02H
+ 0059  CD 21			    INT 21H
+				
+ 005B  46			    INC SI
+ 005C  E2 F0			    LOOP OUTPUT_LOOP
+ 005E  E8 00F2 R		    CALL PRINT_NEWLINE
+ 0061  EB 10 90			    JMP EXIT_OK
+				
+ 0064				BAD_INPUT:
+ 0064  8D 16 0040 R		    LEA DX, ERROR_TEXT
+ 0068  E8 00ED R		    CALL PRINT_STRING
+ 006B  E8 00F2 R		    CALL PRINT_NEWLINE
+ 006E  B8 4C01			    MOV AX, 4C01H
+ 0071  CD 21			    INT 21H
+				
+ 0073				EXIT_OK:
+ 0073  B8 4C00			    MOV AX, 4C00H
+ 0076  CD 21			    INT 21H
+				
+				; Read one decimal number from 0 through 255.
+				; Return: AL = byte and CF = 0, or CF = 1 for i
+				nvalid input.
+ 0078				READ_BYTE PROC NEAR
+ 0078  53			    PUSH BX
+ 0079  51			    PUSH CX
+ 007A  52			    PUSH DX
+ 007B  56			    PUSH SI
+				
+ 007C  8D 16 0070 R		    LEA DX, INPUT_BUFFER
+ 0080  B4 0A			    MOV AH, 0AH
+ 0082  CD 21			    INT 21H
+				
+ 0084  8A 0E 0071 R		    MOV CL, INPUT_BUFFER[1]
+ 0088  32 ED			    XOR CH, CH
+ 008A  E3 39			    JCXZ RB_INVALID
+ 008C  83 F9 03			    CMP CX, 3
+ 008F  77 34			    JA RB_INVALID
+				
+ 0091  8D 36 0072 R		    LEA SI, INPUT_BUFFER[2]
+ 0095  33 DB			    XOR BX, BX
+				
+ 0097				RB_NEXT_DIGIT:
+ 0097  8A 04			    MOV AL, [SI]
+ 0099  3C 30			    CMP AL, '0'
+ 009B  72 28			    JB RB_INVALID
+ 009D  3C 39			    CMP AL, '9'
+ 009F  77 24			    JA RB_INVALID
+				
+Microsoft (R) Macro Assembler Version 5.10                  8/31/26 15:09:25
+                                                             Page     1-4
+
+
+ 00A1  8A D0			    MOV DL, AL
+ 00A3  80 EA 30			    SUB DL, '0'
+ 00A6  32 F6			    XOR DH, DH
+				
+				    ; New value = old value * 10 + new digit.
+ 00A8  8B C3			    MOV AX, BX
+ 00AA  D1 E0			    SHL AX, 1
+ 00AC  8B D8			    MOV BX, AX
+ 00AE  D1 E0			    SHL AX, 1
+ 00B0  D1 E0			    SHL AX, 1
+ 00B2  03 C3			    ADD AX, BX
+ 00B4  03 C2			    ADD AX, DX
+				
+ 00B6  3D 00FF			    CMP AX, 255
+ 00B9  77 0A			    JA RB_INVALID
+ 00BB  8B D8			    MOV BX, AX
+ 00BD  46			    INC SI
+ 00BE  E2 D7			    LOOP RB_NEXT_DIGIT
+				
+ 00C0  8B C3			    MOV AX, BX
+ 00C2  F8			    CLC
+ 00C3  EB 01			    JMP SHORT RB_RETURN
+				
+ 00C5				RB_INVALID:
+ 00C5  F9			    STC
+				
+ 00C6				RB_RETURN:
+ 00C6  5E			    POP SI
+ 00C7  5A			    POP DX
+ 00C8  59			    POP CX
+ 00C9  5B			    POP BX
+ 00CA  C3			    RET
+ 00CB				READ_BYTE ENDP
+				
+				; Print the unsigned byte in AX as decimal.
+ 00CB				PRINT_BYTE PROC NEAR
+ 00CB  50			    PUSH AX
+ 00CC  53			    PUSH BX
+ 00CD  51			    PUSH CX
+ 00CE  52			    PUSH DX
+				
+ 00CF  33 C9			    XOR CX, CX
+ 00D1  BB 000A			    MOV BX, 10
+				
+ 00D4				PB_DIVIDE:
+ 00D4  33 D2			    XOR DX, DX
+ 00D6  F7 F3			    DIV BX
+ 00D8  52			    PUSH DX
+ 00D9  41			    INC CX
+ 00DA  0B C0			    OR AX, AX
+ 00DC  75 F6			    JNZ PB_DIVIDE
+				
+ 00DE				PB_PRINT:
+ 00DE  5A			    POP DX
+Microsoft (R) Macro Assembler Version 5.10                  8/31/26 15:09:25
+                                                             Page     1-5
+
+
+ 00DF  80 C2 30			    ADD DL, '0'
+ 00E2  B4 02			    MOV AH, 02H
+ 00E4  CD 21			    INT 21H
+ 00E6  E2 F6			    LOOP PB_PRINT
+				
+ 00E8  5A			    POP DX
+ 00E9  59			    POP CX
+ 00EA  5B			    POP BX
+ 00EB  58			    POP AX
+ 00EC  C3			    RET
+ 00ED				PRINT_BYTE ENDP
+				
+ 00ED				PRINT_STRING PROC NEAR
+ 00ED  B4 09			    MOV AH, 09H
+ 00EF  CD 21			    INT 21H
+ 00F1  C3			    RET
+ 00F2				PRINT_STRING ENDP
+				
+ 00F2				PRINT_NEWLINE PROC NEAR
+ 00F2  8D 16 006D R		    LEA DX, NEWLINE
+ 00F6  E8 00ED R		    CALL PRINT_STRING
+ 00F9  C3			    RET
+ 00FA				PRINT_NEWLINE ENDP
+				
+ 00FA				CODESEG ENDS
+				END START
+Microsoft (R) Macro Assembler Version 5.10                  8/31/26 15:09:25
+                                                             Symbols-1
+
+
+Segments and Groups:
+
+                N a m e         	Length	 Align	Combine Class
+
+CODESEG  . . . . . . . . . . . .  	00FA	PARA	PUBLIC	'CODE'
+DATASEG  . . . . . . . . . . . .  	400A	PARA	PUBLIC	'DATA'
+STACKSEG . . . . . . . . . . . .  	0100	PARA	STACK	'STACK'
+
+Symbols:            
+
+                N a m e         	Type	 Value	 Attr
+
+BAD_INPUT  . . . . . . . . . . .  	L NEAR	0064	CODESEG
+
+DEST_BYTES . . . . . . . . . . .  	L BYTE	4000	DATASEG	Length = 000A
+
+ERROR_TEXT . . . . . . . . . . .  	L BYTE	0040	DATASEG
+EXIT_OK  . . . . . . . . . . . .  	L NEAR	0073	CODESEG
+
+INPUT_BUFFER . . . . . . . . . .  	L BYTE	0070	DATASEG
+INPUT_LOOP . . . . . . . . . . .  	L NEAR	0012	CODESEG
+INPUT_OK . . . . . . . . . . . .  	L NEAR	0021	CODESEG
+
+NEWLINE  . . . . . . . . . . . .  	L BYTE	006D	DATASEG
+
+OUTPUT_LOOP  . . . . . . . . . .  	L NEAR	004E	CODESEG
+OUTPUT_TEXT  . . . . . . . . . .  	L BYTE	0037	DATASEG
+
+PB_DIVIDE  . . . . . . . . . . .  	L NEAR	00D4	CODESEG
+PB_PRINT . . . . . . . . . . . .  	L NEAR	00DE	CODESEG
+PRINT_BYTE . . . . . . . . . . .  	N PROC	00CB	CODESEG	Length = 0022
+PRINT_NEWLINE  . . . . . . . . .  	N PROC	00F2	CODESEG	Length = 0008
+PRINT_STRING . . . . . . . . . .  	N PROC	00ED	CODESEG	Length = 0005
+PROMPT_TEXT  . . . . . . . . . .  	L BYTE	0020	DATASEG
+
+RB_INVALID . . . . . . . . . . .  	L NEAR	00C5	CODESEG
+RB_NEXT_DIGIT  . . . . . . . . .  	L NEAR	0097	CODESEG
+RB_RETURN  . . . . . . . . . . .  	L NEAR	00C6	CODESEG
+READ_BYTE  . . . . . . . . . . .  	N PROC	0078	CODESEG	Length = 0053
+
+SOURCE_BYTES . . . . . . . . . .  	L BYTE	3000	DATASEG	Length = 000A
+START  . . . . . . . . . . . . .  	L NEAR	0000	CODESEG
+
+TITLE_TEXT . . . . . . . . . . .  	L BYTE	0000	DATASEG
+TRANSFER_LOOP  . . . . . . . . .  	L NEAR	0032	CODESEG
+
+@CPU . . . . . . . . . . . . . .  	TEXT  0101h		
+@FILENAME  . . . . . . . . . . .  	TEXT  q1		
+@VERSION . . . . . . . . . . . .  	TEXT  510		
+
+Microsoft (R) Macro Assembler Version 5.10                  8/31/26 15:09:25
+                                                             Symbols-2
+
+
+
+    206 Source  Lines
+    206 Total   Lines
+     35 Symbols
+
+  47898 + 455264 Bytes symbol space free
+
+      0 Warning Errors
+      0 Severe  Errors

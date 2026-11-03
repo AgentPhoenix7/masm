@@ -1,0 +1,12 @@
+@ECHO OFF
+ECHO ===== QUESTION 1 =====
+Q1.EXE
+ECHO ===== QUESTION 2 =====
+Q2.EXE
+ECHO ===== QUESTION 3 =====
+Q3.EXE
+ECHO ===== QUESTION 4 =====
+Q4.EXE
+ECHO ===== QUESTION 5 =====
+Q5.EXE
+

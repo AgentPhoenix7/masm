@@ -1,0 +1,380 @@
+; Convert an infix expression to postfix notation.
+; Supports unsigned integer operands, +, -, *, /, ^, and parentheses.
+; Unary operators and variables are intentionally not supported.
+
+STACKSEG SEGMENT PARA STACK 'STACK'
+    DW 128 DUP (?)
+STACKSEG ENDS
+
+MAX_INPUT  EQU 80
+MAX_OUTPUT EQU 170
+
+DATASEG SEGMENT PARA PUBLIC 'DATA'
+    TITLE_TEXT   DB 13,10,'INFIX TO POSTFIX CONVERTER',13,10,'$'
+    HELP_TEXT    DB 'Use integers and + - * / ^ ( ).',13,10,'$'
+    PROMPT_TEXT  DB 'Enter infix expression: $'
+    RESULT_TEXT  DB 13,10,'Postfix expression: $'
+    ERROR_TEXT   DB 13,10,'ERROR: invalid infix expression.',13,10,'$'
+    LONG_TEXT    DB 13,10,'ERROR: expression is too long.',13,10,'$'
+    NEWLINE      DB 13,10,'$'
+
+    INPUT_LENGTH      DW 0
+    INPUT_DATA        DB MAX_INPUT+1 DUP (0)
+    OUTPUT_LENGTH     DW 0
+    POSTFIX_BUFFER    DB MAX_OUTPUT DUP ('$')
+
+    OP_TOP             DB 0
+    OPERATOR_STACK     DB MAX_INPUT DUP (0)
+    EXPECT_OPERAND     DB 1
+    CURRENT_OPERATOR   DB 0
+    CURRENT_PRECEDENCE DB 0
+DATASEG ENDS
+
+CODESEG SEGMENT PARA PUBLIC 'CODE'
+    ASSUME CS:CODESEG, DS:DATASEG, SS:STACKSEG
+
+START:
+    MOV AX, DATASEG
+    MOV DS, AX
+
+    LEA DX, TITLE_TEXT
+    CALL PRINT_STRING
+    LEA DX, HELP_TEXT
+    CALL PRINT_STRING
+    LEA DX, PROMPT_TEXT
+    CALL PRINT_STRING
+
+    CALL READ_EXPRESSION
+    JNC INPUT_OK
+    LEA DX, LONG_TEXT
+    CALL PRINT_STRING
+    JMP PROGRAM_ERROR
+
+INPUT_OK:
+    CALL CONVERT_TO_POSTFIX
+    JNC CONVERSION_OK
+    LEA DX, ERROR_TEXT
+    CALL PRINT_STRING
+    JMP PROGRAM_ERROR
+
+CONVERSION_OK:
+    LEA DX, RESULT_TEXT
+    CALL PRINT_STRING
+    LEA DX, POSTFIX_BUFFER
+    CALL PRINT_STRING
+    LEA DX, NEWLINE
+    CALL PRINT_STRING
+
+    MOV AX, 4C00H
+    INT 21H
+
+PROGRAM_ERROR:
+    MOV AX, 4C01H
+    INT 21H
+
+; Read one line a character at a time. DOS function 01H echoes keyboard
+; input and also permits the automated tests to redirect a text file.
+; Returns CF set when more than MAX_INPUT characters were entered.
+READ_EXPRESSION PROC NEAR
+    PUSH AX
+    PUSH CX
+    PUSH DI
+
+    LEA DI, INPUT_DATA
+    XOR CX, CX
+
+RE_READ:
+    MOV AH, 01H
+    INT 21H
+    CMP AL, 13
+    JE RE_DONE
+
+    CMP CX, MAX_INPUT
+    JAE RE_TOO_LONG
+    MOV [DI], AL
+    INC DI
+    INC CX
+    JMP RE_READ
+
+RE_TOO_LONG:
+    ; Discard the rest of the line before reporting the error.
+    MOV AH, 01H
+    INT 21H
+    CMP AL, 13
+    JNE RE_TOO_LONG
+    STC
+    JMP RE_RETURN
+
+RE_DONE:
+    MOV INPUT_LENGTH, CX
+    MOV BYTE PTR [DI], 0
+    CLC
+
+RE_RETURN:
+    POP DI
+    POP CX
+    POP AX
+    RET
+READ_EXPRESSION ENDP
+
+; Convert INPUT_DATA to POSTFIX_BUFFER with the operator-stack method.
+; Returns CF clear for success and CF set for an invalid expression.
+CONVERT_TO_POSTFIX PROC NEAR
+    PUSH AX
+    PUSH BX
+    PUSH CX
+    PUSH DX
+    PUSH SI
+
+    MOV OUTPUT_LENGTH, 0
+    MOV OP_TOP, 0
+    MOV EXPECT_OPERAND, 1
+    LEA SI, INPUT_DATA
+    MOV CX, INPUT_LENGTH
+
+CT_NEXT:
+    CMP CX, 0
+    JNE CT_HAVE_CHARACTER
+    JMP CT_END_INPUT
+
+CT_HAVE_CHARACTER:
+    MOV AL, [SI]
+
+    CMP AL, ' '
+    JE CT_SKIP_SPACE
+
+    CMP AL, '0'
+    JB CT_NOT_NUMBER
+    CMP AL, '9'
+    JA CT_NOT_NUMBER
+
+    ; A complete multi-digit integer is one postfix token.
+    CMP EXPECT_OPERAND, 1
+    JE CT_NUMBER
+    JMP CT_INVALID
+
+CT_NUMBER:
+    MOV AL, [SI]
+    CALL APPEND_OUTPUT
+    JC CT_INVALID
+    INC SI
+    DEC CX
+    CMP CX, 0
+    JE CT_NUMBER_DONE
+    MOV AL, [SI]
+    CMP AL, '0'
+    JB CT_NUMBER_DONE
+    CMP AL, '9'
+    JBE CT_NUMBER
+
+CT_NUMBER_DONE:
+    MOV AL, ' '
+    CALL APPEND_OUTPUT
+    JC CT_INVALID
+    MOV EXPECT_OPERAND, 0
+    JMP CT_NEXT
+
+CT_NOT_NUMBER:
+    CMP AL, '('
+    JE CT_OPEN_PAREN
+    CMP AL, ')'
+    JE CT_CLOSE_PAREN
+    CMP AL, '+'
+    JE CT_OPERATOR
+    CMP AL, '-'
+    JE CT_OPERATOR
+    CMP AL, '*'
+    JE CT_OPERATOR
+    CMP AL, '/'
+    JE CT_OPERATOR
+    CMP AL, '^'
+    JE CT_OPERATOR
+    JMP CT_INVALID
+
+CT_SKIP_SPACE:
+    INC SI
+    DEC CX
+    JMP CT_NEXT
+
+CT_OPEN_PAREN:
+    CMP EXPECT_OPERAND, 1
+    JE CT_PUSH_OPEN
+    JMP CT_INVALID
+
+CT_PUSH_OPEN:
+    XOR BX, BX
+    MOV BL, OP_TOP
+    CMP BX, MAX_INPUT
+    JAE CT_INVALID
+    MOV OPERATOR_STACK[BX], '('
+    INC OP_TOP
+    INC SI
+    DEC CX
+    JMP CT_NEXT
+
+CT_CLOSE_PAREN:
+    CMP EXPECT_OPERAND, 0
+    JE CT_CLOSE_POP
+    JMP CT_INVALID
+
+CT_CLOSE_POP:
+    CMP OP_TOP, 0
+    JE CT_INVALID
+    DEC OP_TOP
+    XOR BX, BX
+    MOV BL, OP_TOP
+    MOV AL, OPERATOR_STACK[BX]
+    CMP AL, '('
+    JE CT_CLOSE_DONE
+    CALL APPEND_OPERATOR
+    JC CT_INVALID
+    JMP CT_CLOSE_POP
+
+CT_CLOSE_DONE:
+    INC SI
+    DEC CX
+    JMP CT_NEXT
+
+CT_OPERATOR:
+    CMP EXPECT_OPERAND, 0
+    JE CT_SAVE_OPERATOR
+    JMP CT_INVALID
+
+CT_SAVE_OPERATOR:
+    MOV CURRENT_OPERATOR, AL
+    CALL GET_PRECEDENCE
+    MOV CURRENT_PRECEDENCE, AH
+
+CT_COMPARE_TOP:
+    CMP OP_TOP, 0
+    JE CT_PUSH_OPERATOR
+    XOR BX, BX
+    MOV BL, OP_TOP
+    DEC BX
+    MOV AL, OPERATOR_STACK[BX]
+    CMP AL, '('
+    JE CT_PUSH_OPERATOR
+
+    CALL GET_PRECEDENCE
+    CMP AH, CURRENT_PRECEDENCE
+    JA CT_POP_OPERATOR
+    JB CT_PUSH_OPERATOR
+
+    ; Equal-precedence operators are popped, except ^. Exponentiation is
+    ; right-associative, so 2^3^4 becomes 2 3 4 ^ ^.
+    CMP CURRENT_OPERATOR, '^'
+    JE CT_PUSH_OPERATOR
+
+CT_POP_OPERATOR:
+    DEC OP_TOP
+    CALL APPEND_OPERATOR
+    JC CT_INVALID
+    JMP CT_COMPARE_TOP
+
+CT_PUSH_OPERATOR:
+    XOR BX, BX
+    MOV BL, OP_TOP
+    CMP BX, MAX_INPUT
+    JAE CT_INVALID
+    MOV AL, CURRENT_OPERATOR
+    MOV OPERATOR_STACK[BX], AL
+    INC OP_TOP
+    MOV EXPECT_OPERAND, 1
+    INC SI
+    DEC CX
+    JMP CT_NEXT
+
+CT_END_INPUT:
+    CMP EXPECT_OPERAND, 0
+    JE CT_EMPTY_STACK
+    JMP CT_INVALID
+
+CT_EMPTY_STACK:
+    CMP OP_TOP, 0
+    JE CT_FINISH
+    DEC OP_TOP
+    XOR BX, BX
+    MOV BL, OP_TOP
+    MOV AL, OPERATOR_STACK[BX]
+    CMP AL, '('
+    JE CT_INVALID
+    CALL APPEND_OPERATOR
+    JC CT_INVALID
+    JMP CT_EMPTY_STACK
+
+CT_FINISH:
+    ; Replace the final separator with DOS's string terminator.
+    MOV BX, OUTPUT_LENGTH
+    CMP BX, 0
+    JE CT_INVALID
+    DEC BX
+    MOV POSTFIX_BUFFER[BX], '$'
+    CLC
+    JMP CT_RETURN
+
+CT_INVALID:
+    STC
+
+CT_RETURN:
+    POP SI
+    POP DX
+    POP CX
+    POP BX
+    POP AX
+    RET
+CONVERT_TO_POSTFIX ENDP
+
+; Append the operator in AL followed by one separator space.
+APPEND_OPERATOR PROC NEAR
+    CALL APPEND_OUTPUT
+    JC AO_RETURN
+    MOV AL, ' '
+    CALL APPEND_OUTPUT
+AO_RETURN:
+    RET
+APPEND_OPERATOR ENDP
+
+; Append AL to POSTFIX_BUFFER. Returns CF set if the buffer is full.
+APPEND_OUTPUT PROC NEAR
+    PUSH BX
+
+    MOV BX, OUTPUT_LENGTH
+    CMP BX, MAX_OUTPUT-1
+    JAE AO_FULL
+    MOV POSTFIX_BUFFER[BX], AL
+    INC OUTPUT_LENGTH
+    CLC
+    JMP AO_DONE
+
+AO_FULL:
+    STC
+AO_DONE:
+    POP BX
+    RET
+APPEND_OUTPUT ENDP
+
+; Input: AL = operator. Output: AH = precedence (1, 2, or 3).
+GET_PRECEDENCE PROC NEAR
+    MOV AH, 1
+    CMP AL, '+'
+    JE GP_DONE
+    CMP AL, '-'
+    JE GP_DONE
+    MOV AH, 2
+    CMP AL, '*'
+    JE GP_DONE
+    CMP AL, '/'
+    JE GP_DONE
+    MOV AH, 3
+GP_DONE:
+    RET
+GET_PRECEDENCE ENDP
+
+PRINT_STRING PROC NEAR
+    MOV AH, 09H
+    INT 21H
+    RET
+PRINT_STRING ENDP
+
+CODESEG ENDS
+END START

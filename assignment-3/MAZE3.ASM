@@ -1,0 +1,888 @@
+; 8086 / MASM / DOS - THREE-PLAYER MAZE RACE v3
+; P1 WASD; P2 IJKL; P3 TFGH. Space starts. Esc exits.
+; Colliding players each receive +3.0 seconds per contact episode.
+; Winner = lowest finish time + penalties, after all three finish.
+; Build: MASM MAZE5.ASM; then LINK MAZE5.OBJ;
+.8086
+.MODEL SMALL
+.STACK 500H
+MAZE_ROWS EQU 17
+MAZE_COLS EQU 61
+MAZE_TOP EQU 7
+MAZE_LEFT EQU 9
+MOVE_TICKS EQU 2
+PENALTY_TENTHS EQU 30
+EXIT_ROW EQU 9
+EXIT_COL EQU 27
+
+.DATA
+TITLE_TEXT DB 'THREE-PLAYER MAZE v5 | WASD / IJKL / TFGH | Esc: quit',0
+CLOCK_TEXT DB 'Race: ',0
+RULE_TEXT DB 's  | Player collisions: +3.0s to BOTH; walls block.',0
+P1_TEXT DB 'P1 WASD',0
+P2_TEXT DB 'P2 IJKL',0
+P3_TEXT DB 'P3 TFGH',0
+PLAYER_TEXTS DW OFFSET P1_TEXT,OFFSET P2_TEXT,OFFSET P3_TEXT
+STEP_TEXT DB 'Steps:',0
+PEN_TEXT DB 'Penalty:',0
+SCORE_TEXT DB 'Score:',0
+ACTIVE_TEXT DB 'RACING',0
+DONE_TEXT DB 'DONE',0
+READY_TEXT DB 'SPACE starts | 1:WASD  2:IJKL  3:TFGH | Reach green E. Esc exits.',0
+RACING_TEXT DB 'Reach green E. Score = finish time + penalties. Finishers leave the maze.',0
+WIN_TEXT DB 'WINNER: ',0
+TIE_TEXT DB 'TIE: ',0
+FINAL_TEXT DB ' | Best score: ',0
+FINAL_SUFFIX DB 's  (finish time + penalties)',0
+LEGEND_TEXT DB '1: W/A/S/D    2: I/J/K/L    3: T/F/G/H    |    Green E = shared exit',0
+PLAYER_CHARS DB '1','2','3'
+PLAYER_COLORS DB 0EH,0BH,0DH
+MAZE DB '#############################################################'
+     DB '#           #                 #               #         #   #'
+     DB '# ####### # ### # ####### # # # ####### # ### # ### ### # # #'
+     DB '#   #     # #   # #     # #             #   # #   # # # #   #'
+     DB '### # ### # # # # # ### # ####### ### # # # # # ### # # ### #'
+     DB '#   # #   #   #   # #   #         # # #   # #   #   #       #'
+     DB '# ### # # ####### # # # # ####### # # ### # # # # ### ##### #'
+     DB '#       #     #             #       #   # # # # #     #     #'
+     DB '# # ### ##### # # # ######### ### ### # # # # # # # # # #####'
+     DB '#     #         #     #    E  #       # # #         # #   # #'
+     DB '# ### # ### # ####### # ### ### ### # # # # ### ### ##### # #'
+     DB '#         # #   #   #       #     # # #   #   # #       #   #'
+     DB '### # ### # # # ### # ##### # ### # ### # ### # # ### # # # #'
+     DB '#   #         #   # #       #   #     # #   # #     # #     #'
+     DB '# ### ### ### ### # # ####### # # ### # ##### # ### # ### # #'
+     DB '#                                   #         #             #'
+     DB '#############################################################'
+MAZE_END LABEL BYTE
+PLAYER_ROWS DB 11,1,3
+PLAYER_COLS DB 11,21,43
+CAND_ROWS DB 3 DUP(0)
+CAND_COLS DB 3 DUP(0)
+MOVING DB 3 DUP(0)
+BLOCKED DB 3 DUP(0)
+DONE DB 3 DUP(0)
+STEPS DD 3 DUP(0)
+PENALTIES DD 3 DUP(0)       ; Units: tenths of a second
+FINISH_TIMES DD 3 DUP(0)    ; Unpenalized elapsed time at the exit
+PAIR_TOUCH DB 3 DUP(0)      ; Pairs: 1-2, 1-3, 2-3
+PAIR_LATCH DB 3 DUP(0)
+KEY_STATE DB 128 DUP(0)
+KEY_PENDING DB 128 DUP(0)
+; Scan codes, in up/down/left/right order.
+CONTROLS DB 11H,1FH,1EH,20H, 17H,25H,24H,26H, 14H,22H,21H,23H
+OLD_INT9 DD ?
+LAST_BIOS DD 0
+ELAPSED_TICKS DD 0
+ELAPSED_TENTHS DD 0
+FRAME_TICKS DW 0
+STARTED DB 0
+FINISHED_COUNT DB 0
+WIN_MASK DB 0
+BEST_SCORE DD 0FFFFFFFFH
+
+.CODE
+MAIN PROC
+    MOV AX,@DATA
+    MOV DS,AX
+    CLD
+    MOV AX,0003H
+    INT 10H
+    MOV AH,01H
+    MOV CX,2000H
+    INT 10H
+    CALL DRAW_SCREEN
+    MOV AX,3509H
+    INT 21H
+    MOV WORD PTR OLD_INT9,BX
+    MOV AX,ES
+    MOV WORD PTR OLD_INT9+2,AX
+    PUSH DS
+    PUSH CS
+    POP DS
+    MOV DX,OFFSET KEYBOARD_ISR
+    MOV AX,2509H
+    INT 21H
+    POP DS
+WAIT_FRAME:
+    CMP KEY_STATE[01H],0
+    JNE EXIT_PROGRAM
+    CMP KEY_PENDING[01H],0
+    JNE EXIT_PROGRAM
+    CMP STARTED,0
+    JNE RUNNING
+    CMP KEY_PENDING[39H],0
+    JE IDLE_WAIT
+    MOV STARTED,1
+    MOV AH,00H
+    INT 1AH
+    MOV WORD PTR LAST_BIOS,DX
+    MOV WORD PTR LAST_BIOS+2,CX
+    CALL DRAW_SCREEN
+    JMP IDLE_WAIT
+RUNNING:
+    CMP FINISHED_COUNT,3
+    JE IDLE_WAIT
+    CALL UPDATE_CLOCK
+    CMP FRAME_TICKS,MOVE_TICKS
+    JB IDLE_WAIT
+    MOV FRAME_TICKS,0
+    CLI                       ; Snapshot/update game state, without I/O
+    CALL BUILD_INTENTS
+    CALL RESOLVE_COLLISIONS
+    CALL COMMIT_MOVES
+    STI
+    CMP FINISHED_COUNT,3
+    JNE DRAW_FRAME
+    CALL FIND_WINNERS
+DRAW_FRAME:
+    CALL DRAW_SCREEN
+IDLE_WAIT:
+    STI
+    HLT
+    JMP WAIT_FRAME
+EXIT_PROGRAM:
+    PUSH DS
+    LDS DX,OLD_INT9
+    MOV AX,2509H
+    INT 21H
+    POP DS
+    MOV AX,0003H
+    INT 10H
+    MOV AX,4C00H
+    INT 21H
+MAIN ENDP
+
+; Maintain elapsed ticks, including the BIOS midnight rollover.
+UPDATE_CLOCK PROC NEAR
+    MOV AH,00H
+    INT 1AH
+    MOV AX,DX
+    MOV BX,CX
+    SUB AX,WORD PTR LAST_BIOS
+    SBB BX,WORD PTR LAST_BIOS+2
+    JNC CLOCK_DELTA_OK
+    ADD AX,00B0H              ; BIOS day length = 0018:00B0 ticks
+    ADC BX,0018H
+CLOCK_DELTA_OK:
+    MOV WORD PTR LAST_BIOS,DX
+    MOV WORD PTR LAST_BIOS+2,CX
+    ADD FRAME_TICKS,AX
+    ADD WORD PTR ELAPSED_TICKS,AX
+    ADC WORD PTR ELAPSED_TICKS+2,BX
+    MOV AX,WORD PTR ELAPSED_TICKS
+    MOV DX,WORD PTR ELAPSED_TICKS+2
+    CALL TICKS_TO_TENTHS
+    MOV WORD PTR ELAPSED_TENTHS,AX
+    MOV WORD PTR ELAPSED_TENTHS+2,DX
+    RET
+UPDATE_CLOCK ENDP
+
+KEYBOARD_ISR PROC FAR
+    PUSH AX
+    PUSH BX
+    PUSH DS
+    IN AL, 60H            ; Read the keyboard scan code
+    MOV BL, AL
+
+    IN AL, 61H            ; Acknowledge the keyboard controller
+    MOV AH, AL
+    OR AL, 80H
+    OUT 61H, AL
+    MOV AL, AH
+    OUT 61H, AL
+
+    MOV AX, @DATA
+    MOV DS, AX
+    CMP BL, 0E0H          ; Ignore extended-key prefix bytes
+    JE IRQ_DONE
+    CMP BL, 0E1H
+    JE IRQ_DONE
+    MOV AH, 1             ; Make code: key is down
+    TEST BL, 80H
+    JZ STORE_KEY
+    XOR AH, AH            ; Break code: key is up
+STORE_KEY:
+    AND BL, 7FH
+    XOR BH, BH
+    OR AH, AH
+    JZ SAVE_KEY_STATE      ; Release: keep pending presses for the next frame
+    CMP KEY_STATE[BX], 0
+    JNE SAVE_KEY_STATE     ; Ignore typematic repeats while a key is held
+    CMP KEY_PENDING[BX], 0FFH
+    JE SAVE_KEY_STATE
+    INC KEY_PENDING[BX]    ; Latch each new press, even if released quickly
+SAVE_KEY_STATE:
+    MOV KEY_STATE[BX], AH
+IRQ_DONE:
+    MOV AL, 20H           ; End of interrupt to the master PIC
+    OUT 20H, AL
+    POP DS
+    POP BX
+    POP AX
+    IRET
+KEYBOARD_ISR ENDP
+
+; Build all proposals before checking collisions, so all players share a frame.
+BUILD_INTENTS PROC NEAR
+    XOR SI,SI
+BUILD_PLAYER:
+    MOV AL,PLAYER_ROWS[SI]
+    MOV CAND_ROWS[SI],AL
+    MOV AL,PLAYER_COLS[SI]
+    MOV CAND_COLS[SI],AL
+    MOV MOVING[SI],0
+    MOV BLOCKED[SI],0
+    CMP DONE[SI],0
+    JNE NEXT_INTENT
+    MOV BX,SI
+    SHL BX,1
+    SHL BX,1
+    XOR BP,BP
+    MOV CX,4
+FIND_DIRECTION:
+    XOR AX,AX
+    MOV AL,CONTROLS[BX]
+    MOV DI,AX
+    CMP KEY_PENDING[DI],0
+    JNE HAVE_DIRECTION
+    CMP KEY_STATE[DI],0
+    JNE HAVE_DIRECTION
+    INC BX
+    INC BP
+    LOOP FIND_DIRECTION
+    JMP NEXT_INTENT
+HAVE_DIRECTION:
+    CMP KEY_PENDING[DI],0
+    JE GET_POSITION
+    DEC KEY_PENDING[DI]
+GET_POSITION:
+    MOV DH,PLAYER_ROWS[SI]
+    MOV DL,PLAYER_COLS[SI]
+    CMP BP,0
+    JE MOVE_UP
+    CMP BP,1
+    JE MOVE_DOWN
+    CMP BP,2
+    JE MOVE_LEFT
+    INC DL
+    JMP CHECK_WALL
+MOVE_UP:
+    DEC DH
+    JMP CHECK_WALL
+MOVE_DOWN:
+    INC DH
+    JMP CHECK_WALL
+MOVE_LEFT:
+    DEC DL
+CHECK_WALL:
+    CMP DH,MAZE_ROWS
+    JAE NEXT_INTENT
+    CMP DL,MAZE_COLS
+    JAE NEXT_INTENT
+    MOV AL,DH
+    MOV BL,MAZE_COLS
+    MUL BL
+    XOR BX,BX
+    MOV BL,DL
+    ADD BX,AX
+    CMP BYTE PTR MAZE[BX],'#'
+    JE NEXT_INTENT
+    MOV CAND_ROWS[SI],DH
+    MOV CAND_COLS[SI],DL
+    MOV MOVING[SI],1
+NEXT_INTENT:
+    INC SI
+    CMP SI,3
+    JB BUILD_PLAYER
+    RET
+BUILD_INTENTS ENDP
+
+; Mark equal-destination and head-on swap collisions for one player pair.
+; SI/DI = player indices; BX = pair index. Goal arrivals may share E.
+CHECK_PAIR PROC NEAR
+    CMP DONE[SI],0
+    JNE PAIR_DONE
+    CMP DONE[DI],0
+    JNE PAIR_DONE
+    MOV AL,MOVING[SI]
+    OR AL,MOVING[DI]
+    JZ PAIR_DONE
+    MOV AL,CAND_ROWS[SI]
+    CMP AL,CAND_ROWS[DI]
+    JNE CHECK_SWAP
+    MOV AL,CAND_COLS[SI]
+    CMP AL,CAND_COLS[DI]
+    JNE CHECK_SWAP
+    CMP AL,EXIT_COL
+    JNE CONTACT
+    CMP BYTE PTR CAND_ROWS[SI],EXIT_ROW
+    JE PAIR_DONE
+    JMP CONTACT
+CHECK_SWAP:
+    CMP MOVING[SI],0
+    JE PAIR_DONE
+    CMP MOVING[DI],0
+    JE PAIR_DONE
+    MOV AL,CAND_ROWS[SI]
+    CMP AL,PLAYER_ROWS[DI]
+    JNE PAIR_DONE
+    MOV AL,CAND_COLS[SI]
+    CMP AL,PLAYER_COLS[DI]
+    JNE PAIR_DONE
+    MOV AL,CAND_ROWS[DI]
+    CMP AL,PLAYER_ROWS[SI]
+    JNE PAIR_DONE
+    MOV AL,CAND_COLS[DI]
+    CMP AL,PLAYER_COLS[SI]
+    JNE PAIR_DONE
+CONTACT:
+    MOV BLOCKED[SI],1
+    MOV BLOCKED[DI],1
+    MOV PAIR_TOUCH[BX],1
+PAIR_DONE:
+    RET
+CHECK_PAIR ENDP
+
+RESOLVE_COLLISIONS PROC NEAR
+    MOV PAIR_TOUCH[0],0
+    MOV PAIR_TOUCH[1],0
+    MOV PAIR_TOUCH[2],0
+    MOV BP,3                  ; Propagate a blocked move through a 3-person chain
+RESOLVE_PASS:
+    XOR SI,SI
+    MOV DI,1
+    XOR BX,BX
+    CALL CHECK_PAIR
+    MOV DI,2
+    INC BX
+    CALL CHECK_PAIR
+    MOV SI,1
+    INC BX
+    CALL CHECK_PAIR
+    XOR SI,SI
+CANCEL_BLOCKED:
+    CMP BLOCKED[SI],0
+    JE NEXT_BLOCKED
+    MOV MOVING[SI],0
+    MOV AL,PLAYER_ROWS[SI]
+    MOV CAND_ROWS[SI],AL
+    MOV AL,PLAYER_COLS[SI]
+    MOV CAND_COLS[SI],AL
+NEXT_BLOCKED:
+    INC SI
+    CMP SI,3
+    JB CANCEL_BLOCKED
+    DEC BP
+    JNZ RESOLVE_PASS
+    XOR SI,SI
+    MOV DI,1
+    XOR BX,BX
+    CALL CHARGE_PAIR
+    MOV DI,2
+    INC BX
+    CALL CHARGE_PAIR
+    MOV SI,1
+    INC BX
+    CALL CHARGE_PAIR
+    RET
+RESOLVE_COLLISIONS ENDP
+
+CHARGE_PAIR PROC NEAR
+    MOV AL,PAIR_TOUCH[BX]
+    CMP AL,0
+    JE SAVE_CONTACT
+    CMP PAIR_LATCH[BX],0
+    JNE SAVE_CONTACT
+    PUSH AX
+    PUSH BX
+    MOV BX,SI
+    SHL BX,1
+    SHL BX,1
+    ADD WORD PTR PENALTIES[BX],PENALTY_TENTHS
+    ADC WORD PTR PENALTIES[BX+2],0
+    MOV BX,DI
+    SHL BX,1
+    SHL BX,1
+    ADD WORD PTR PENALTIES[BX],PENALTY_TENTHS
+    ADC WORD PTR PENALTIES[BX+2],0
+    POP BX
+    POP AX
+SAVE_CONTACT:
+    MOV PAIR_LATCH[BX],AL
+    RET
+CHARGE_PAIR ENDP
+
+COMMIT_MOVES PROC NEAR
+    XOR SI,SI
+COMMIT_PLAYER:
+    CMP MOVING[SI],0
+    JE NEXT_COMMIT
+    MOV AL,CAND_ROWS[SI]
+    MOV PLAYER_ROWS[SI],AL
+    MOV AL,CAND_COLS[SI]
+    MOV PLAYER_COLS[SI],AL
+    MOV BX,SI
+    SHL BX,1
+    SHL BX,1
+    ADD WORD PTR STEPS[BX],1
+    ADC WORD PTR STEPS[BX+2],0
+    CMP BYTE PTR PLAYER_ROWS[SI],EXIT_ROW
+    JNE NEXT_COMMIT
+    CMP BYTE PTR PLAYER_COLS[SI],EXIT_COL
+    JNE NEXT_COMMIT
+    MOV DONE[SI],1
+    INC FINISHED_COUNT
+    MOV AX,WORD PTR ELAPSED_TENTHS
+    MOV WORD PTR FINISH_TIMES[BX],AX
+    MOV AX,WORD PTR ELAPSED_TENTHS+2
+    MOV WORD PTR FINISH_TIMES[BX+2],AX
+NEXT_COMMIT:
+    INC SI
+    CMP SI,3
+    JB COMMIT_PLAYER
+    RET
+COMMIT_MOVES ENDP
+
+; SI = player. Return DX:AX = current/final adjusted score in tenths.
+GET_SCORE PROC NEAR
+    MOV BX,SI
+    SHL BX,1
+    SHL BX,1
+    MOV AX,WORD PTR ELAPSED_TENTHS
+    MOV DX,WORD PTR ELAPSED_TENTHS+2
+    CMP DONE[SI],0
+    JE ADD_PENALTY
+    MOV AX,WORD PTR FINISH_TIMES[BX]
+    MOV DX,WORD PTR FINISH_TIMES[BX+2]
+ADD_PENALTY:
+    ADD AX,WORD PTR PENALTIES[BX]
+    ADC DX,WORD PTR PENALTIES[BX+2]
+    RET
+GET_SCORE ENDP
+
+FIND_WINNERS PROC NEAR
+    MOV WORD PTR BEST_SCORE,0FFFFH
+    MOV WORD PTR BEST_SCORE+2,0FFFFH
+    MOV WIN_MASK,0
+    XOR SI,SI
+COMPARE_SCORE:
+    CALL GET_SCORE
+    CMP DX,WORD PTR BEST_SCORE+2
+    JB NEW_BEST
+    JA NEXT_SCORE
+    CMP AX,WORD PTR BEST_SCORE
+    JB NEW_BEST
+    JA NEXT_SCORE
+    JMP ADD_WINNER
+NEW_BEST:
+    MOV WORD PTR BEST_SCORE,AX
+    MOV WORD PTR BEST_SCORE+2,DX
+    MOV WIN_MASK,0
+ADD_WINNER:
+    MOV CX,SI
+    MOV AL,1
+    SHL AL,CL
+    OR WIN_MASK,AL
+NEXT_SCORE:
+    INC SI
+    CMP SI,3
+    JB COMPARE_SCORE
+    RET
+FIND_WINNERS ENDP
+
+; Divide unsigned DX:AX by BX. Quotient DX:AX, remainder CX.
+DIVIDE_U32 PROC NEAR
+    PUSH SI
+    PUSH DI
+    MOV SI,AX
+    MOV AX,DX
+    XOR DX,DX
+    DIV BX
+    MOV DI,AX
+    MOV AX,SI
+    DIV BX
+    MOV CX,DX
+    MOV DX,DI
+    POP DI
+    POP SI
+    RET
+DIVIDE_U32 ENDP
+
+; Convert BIOS ticks to tenths with the 18.2 Hz approximation.
+; Predivision avoids overflowing 32 bits when multiplying by 100.
+TICKS_TO_TENTHS PROC NEAR
+    PUSH BX
+    PUSH CX
+    PUSH SI
+    PUSH DI
+    PUSH BP
+    MOV BX,182
+    CALL DIVIDE_U32
+    PUSH CX
+    MOV SI,DX
+    MOV BX,100
+    MUL BX
+    MOV DI,AX
+    MOV BP,DX
+    MOV AX,SI
+    MUL BX
+    ADD AX,BP
+    MOV DX,AX
+    MOV AX,DI
+    POP CX
+    PUSH AX
+    PUSH DX
+    MOV AX,CX
+    MUL BX
+    MOV BX,182
+    DIV BX
+    MOV BX,AX
+    POP DX
+    POP AX
+    ADD AX,BX
+    ADC DX,0
+    POP BP
+    POP DI
+    POP SI
+    POP CX
+    POP BX
+    RET
+TICKS_TO_TENTHS ENDP
+
+; Print DX:AX tenths as seconds, with one fractional digit.
+PRINT_TIME PROC NEAR
+    PUSH AX
+    PUSH BX
+    PUSH CX
+    PUSH DX
+    MOV BX,10
+    CALL DIVIDE_U32
+    PUSH CX
+    CALL PRINT_NUMBER
+    MOV AL,'.'
+    CALL PUT_CHAR
+    POP AX
+    ADD AL,'0'
+    CALL PUT_CHAR
+    POP DX
+    POP CX
+    POP BX
+    POP AX
+    RET
+PRINT_TIME ENDP
+
+PUT_CHAR PROC NEAR
+    PUSH AX
+    PUSH BX
+    MOV AH,0EH
+    MOV BX,0007H
+    INT 10H
+    POP BX
+    POP AX
+    RET
+PUT_CHAR ENDP
+
+SET_CURSOR PROC NEAR
+    PUSH AX
+    PUSH BX
+    MOV AH,02H
+    XOR BH,BH
+    INT 10H
+    POP BX
+    POP AX
+    RET
+SET_CURSOR ENDP
+
+CLEAR_ROW PROC NEAR
+    PUSH AX
+    PUSH BX
+    PUSH CX
+    XOR DL,DL
+    CALL SET_CURSOR
+    MOV AX,0920H
+    MOV BX,0007H
+    MOV CX,80
+    INT 10H
+    POP CX
+    POP BX
+    POP AX
+    RET
+CLEAR_ROW ENDP
+
+DRAW_SCREEN PROC NEAR
+    PUSH AX
+    PUSH BX
+    PUSH CX
+    PUSH DX
+    PUSH SI
+    PUSH DI
+    PUSH BP
+    XOR DX,DX
+    CALL SET_CURSOR
+    LEA SI,TITLE_TEXT
+    CALL PRINT_TEXT
+    MOV DH,1
+    CALL CLEAR_ROW
+    LEA SI,CLOCK_TEXT
+    CALL PRINT_TEXT
+    MOV AX,WORD PTR ELAPSED_TENTHS
+    MOV DX,WORD PTR ELAPSED_TENTHS+2
+    CALL PRINT_TIME
+    LEA SI,RULE_TEXT
+    CALL PRINT_TEXT
+
+    XOR DI,DI
+DRAW_HUD:
+    MOV DX,DI
+    ADD DH,0                  ; Row = player index + 2
+    MOV DH,DL
+    ADD DH,2
+    CALL CLEAR_ROW
+    MOV BX,DI
+    SHL BX,1
+    MOV SI,PLAYER_TEXTS[BX]
+    CALL PRINT_TEXT
+    MOV DL,9
+    CALL SET_CURSOR
+    LEA SI,STEP_TEXT
+    CALL PRINT_TEXT
+    MOV DL,16
+    CALL SET_CURSOR
+    MOV BX,DI
+    SHL BX,1
+    SHL BX,1
+    MOV AX,WORD PTR STEPS[BX]
+    MOV DX,WORD PTR STEPS[BX+2]
+    CALL PRINT_NUMBER
+    MOV DX,DI
+    MOV DH,DL
+    ADD DH,2
+    MOV DL,27
+    CALL SET_CURSOR
+    LEA SI,PEN_TEXT
+    CALL PRINT_TEXT
+    MOV DL,36
+    CALL SET_CURSOR
+    MOV BX,DI
+    SHL BX,1
+    SHL BX,1
+    MOV AX,WORD PTR PENALTIES[BX]
+    MOV DX,WORD PTR PENALTIES[BX+2]
+    CALL PRINT_TIME
+    MOV DX,DI
+    MOV DH,DL
+    ADD DH,2
+    MOV DL,46
+    CALL SET_CURSOR
+    LEA SI,SCORE_TEXT
+    CALL PRINT_TEXT
+    MOV DL,53
+    CALL SET_CURSOR
+    MOV SI,DI
+    CALL GET_SCORE
+    CALL PRINT_TIME
+    MOV DX,DI
+    MOV DH,DL
+    ADD DH,2
+    MOV DL,68
+    CALL SET_CURSOR
+    LEA SI,ACTIVE_TEXT
+    CMP DONE[DI],0
+    JE PRINT_STATE
+    LEA SI,DONE_TEXT
+PRINT_STATE:
+    CALL PRINT_TEXT
+    INC DI
+    CMP DI,3
+    JB DRAW_HUD
+    MOV DH,5
+    CALL CLEAR_ROW
+    LEA SI,LEGEND_TEXT
+    CALL PRINT_TEXT
+    CALL DRAW_MAZE
+    MOV DH,24
+    CALL CLEAR_ROW
+    LEA SI,READY_TEXT
+    CMP STARTED,0
+    JE PRINT_FOOTER
+    LEA SI,RACING_TEXT
+    CMP FINISHED_COUNT,3
+    JNE PRINT_FOOTER
+    CALL DRAW_WINNERS
+    JMP SCREEN_DONE
+PRINT_FOOTER:
+    CALL PRINT_TEXT
+SCREEN_DONE:
+    POP BP
+    POP DI
+    POP SI
+    POP DX
+    POP CX
+    POP BX
+    POP AX
+    RET
+DRAW_SCREEN ENDP
+
+; Direct text-video writes keep a large maze smooth on an 8086.
+DRAW_MAZE PROC NEAR
+    PUSH AX
+    PUSH BX
+    PUSH CX
+    PUSH DX
+    PUSH SI
+    PUSH DI
+    PUSH BP
+    PUSH ES
+    MOV AX,0B800H
+    MOV ES,AX
+    MOV DI,MAZE_TOP*160+MAZE_LEFT*2
+    LEA SI,MAZE
+    MOV BP,MAZE_ROWS
+VIDEO_ROW:
+    MOV CX,MAZE_COLS
+VIDEO_CELL:
+    LODSB
+    MOV AH,07H
+    CMP AL,'E'
+    JNE WRITE_CELL
+    MOV AH,0AH
+WRITE_CELL:
+    STOSW
+    LOOP VIDEO_CELL
+    ADD DI,(80-MAZE_COLS)*2
+    DEC BP
+    JNZ VIDEO_ROW
+    XOR SI,SI
+DRAW_PLAYER:
+    CMP DONE[SI],0
+    JNE NEXT_PLAYER_DRAW
+    XOR AX,AX
+    MOV AL,PLAYER_ROWS[SI]
+    ADD AX,MAZE_TOP
+    MOV BX,160
+    MUL BX
+    MOV DI,AX
+    XOR AX,AX
+    MOV AL,PLAYER_COLS[SI]
+    ADD AX,MAZE_LEFT
+    SHL AX,1
+    ADD DI,AX
+    MOV AL,PLAYER_CHARS[SI]
+    MOV AH,PLAYER_COLORS[SI]
+    STOSW
+NEXT_PLAYER_DRAW:
+    INC SI
+    CMP SI,3
+    JB DRAW_PLAYER
+    POP ES
+    POP BP
+    POP DI
+    POP SI
+    POP DX
+    POP CX
+    POP BX
+    POP AX
+    RET
+DRAW_MAZE ENDP
+
+DRAW_WINNERS PROC NEAR
+    LEA SI,WIN_TEXT
+    MOV AL,WIN_MASK
+    MOV AH,AL
+    DEC AL
+    AND AL,AH
+    JZ PRINT_WIN_PREFIX
+    LEA SI,TIE_TEXT
+PRINT_WIN_PREFIX:
+    CALL PRINT_TEXT
+    XOR DI,DI
+PRINT_WINNER:
+    MOV CX,DI
+    MOV AL,1
+    SHL AL,CL
+    TEST WIN_MASK,AL
+    JZ NEXT_WINNER
+    MOV AL,'P'
+    CALL PUT_CHAR
+    MOV AX,DI
+    ADD AL,'1'
+    CALL PUT_CHAR
+    MOV AL,' '
+    CALL PUT_CHAR
+NEXT_WINNER:
+    INC DI
+    CMP DI,3
+    JB PRINT_WINNER
+    LEA SI,FINAL_TEXT
+    CALL PRINT_TEXT
+    MOV AX,WORD PTR BEST_SCORE
+    MOV DX,WORD PTR BEST_SCORE+2
+    CALL PRINT_TIME
+    LEA SI,FINAL_SUFFIX
+    CALL PRINT_TEXT
+    RET
+DRAW_WINNERS ENDP
+
+; DS:SI points to a zero-terminated string.
+PRINT_TEXT PROC NEAR
+    PUSH AX
+    PUSH BX
+    PUSH SI
+PRINT_NEXT:
+    LODSB
+    OR AL, AL
+    JZ TEXT_DONE
+    MOV AH, 0EH
+    MOV BX, 0007H
+    INT 10H
+    JMP PRINT_NEXT
+TEXT_DONE:
+    POP SI
+    POP BX
+    POP AX
+    RET
+PRINT_TEXT ENDP
+
+; Print unsigned DX:AX in decimal using two 16-bit divisions per digit.
+PRINT_NUMBER PROC NEAR
+    PUSH AX
+    PUSH BX
+    PUSH CX
+    PUSH DX
+    PUSH SI
+    PUSH DI
+    MOV BX, 10
+    XOR CX, CX
+DIVIDE_DIGIT:
+    MOV SI, AX            ; Save low word
+    MOV AX, DX            ; Divide high word by 10 first
+    XOR DX, DX
+    DIV BX
+    MOV DI, AX            ; High word of quotient
+    MOV AX, SI
+    DIV BX                ; Divide remainder:low word by 10
+    PUSH DX               ; Remainder = next decimal digit
+    MOV DX, DI
+    INC CX
+    MOV SI, AX
+    OR SI, DX
+    JNZ DIVIDE_DIGIT
+PRINT_DIGIT:
+    POP AX
+    ADD AL, '0'
+    MOV AH, 0EH
+    MOV BX, 0007H
+    INT 10H
+    LOOP PRINT_DIGIT
+    POP DI
+    POP SI
+    POP DX
+    POP CX
+    POP BX
+    POP AX
+    RET
+PRINT_NUMBER ENDP
+
+
+END MAIN

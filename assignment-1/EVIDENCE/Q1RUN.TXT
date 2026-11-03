@@ -1,0 +1,13 @@
+
+QUESTION 1 - BLOCK TRANSFER
+Enter a byte (0-255): 0
+Enter a byte (0-255): 1
+Enter a byte (0-255): 9
+Enter a byte (0-255): 10
+Enter a byte (0-255): 25
+Enter a byte (0-255): 49
+Enter a byte (0-255): 50
+Enter a byte (0-255): 100
+Enter a byte (0-255): 200
+Enter a byte (0-255): 255
+Output: 10 15 55 60 135 255 4 254 242 5 

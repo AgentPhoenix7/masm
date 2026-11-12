@@ -1,2 +1,16 @@
 .worktrees/
 .superpowers/
+
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+
+# Generated DOS build products (supplied dos-tools binaries remain versioned)
+/assignment-*/**/*.[Ee][Xx][Ee]
+/assignment-*/**/*.[Oo][Bb][Jj]
+/assignment-*/**/*.[Ll][Ss][Tt]
+/assignment-*/**/*.[Mm][Aa][Pp]

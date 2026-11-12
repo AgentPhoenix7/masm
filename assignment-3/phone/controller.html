@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#102128" />
+    <title>MAZE4 Controller</title>
+    <link rel="stylesheet" href="/controller.css" />
+    <script src="/controller.js" defer></script>
+  </head>
+
+  <body>
+    <main>
+      <header>
+        <span class="eyebrow">MAZE4 · PHONE CONTROLLER</span>
+        <h1>Find your way out.</h1>
+        <p id="connection" role="status">Connecting to the game…</p>
+      </header>
+      <section id="join-panel">
+        <form id="join-form">
+          <label for="name">Player name</label
+          ><input
+            id="name"
+            maxlength="8"
+            autocomplete="nickname"
+            placeholder="Up to 8 characters"
+            required
+          /><label for="password">Room password</label
+          ><input
+            id="password"
+            maxlength="12"
+            autocomplete="off"
+            autocapitalize="characters"
+            spellcheck="false"
+            type="password"
+            required
+          /><button class="primary" type="submit" id="join">Join race</button>
+        </form>
+        <p class="hint">
+          Ask the host for the HTTPS address and room password shown on the PC.
+        </p>
+      </section>
+      <section id="game" hidden>
+        <div class="identity">
+          <strong id="identity"></strong><span id="phase"></span>
+        </div>
+        <div id="warning" role="status">SAFE</div>
+        <p id="details"></p>
+        <button id="ready" class="primary">Ready</button>
+        <div class="dpad" aria-label="Movement controls">
+          <button data-direction="1" class="up" aria-label="Move up">▲</button
+          ><button data-direction="3" class="left" aria-label="Move left">
+            ◀</button
+          ><span class="center">MOVE</span
+          ><button data-direction="4" class="right" aria-label="Move right">
+            ▶</button
+          ><button data-direction="2" class="down" aria-label="Move down">
+            ▼
+          </button>
+        </div>
+        <p class="hint" id="instruction">
+          Look at the maze on the PC. Tap to step; hold to keep moving.
+        </p>
+        <button id="leave" class="secondary">Leave room</button>
+      </section>
+      <p id="error" role="alert"></p>
+      <footer>One maze. Equal starting distance. Your own path.</footer>
+    </main>
+  </body>
+</html>

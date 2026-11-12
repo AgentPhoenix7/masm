@@ -5,6 +5,113 @@ an Android/iOS phone, tablet, or browser, enters the room password, and controls
 one player. Phones can use mobile data or another internet connection. The PC
 screen displays the maze; the phone is a movement controller.
 
+## Install dependencies
+
+The supplied launcher targets **Linux** and expects DOSBox at
+`/usr/bin/dosbox` and cloudflared at `/usr/bin/cloudflared`. Use a graphical
+desktop for normal play. On the host PC, install:
+
+| Dependency | Purpose |
+| --- | --- |
+| Python 3.10 or newer | Build script, controller bridge, launcher and Python tests |
+| DOSBox 0.74-3 | Run the supplied MASM/LINK tools and the DOS game |
+| `cloudflared` CLI | Public HTTPS address when using `--internet` |
+| Supplied `dos-tools/` directory | Required assembler/linker; keep it alongside `assignment-3/` |
+
+The Python code uses only the standard library: **no pip packages are required**.
+The `python-cloudflare`/`cloudflare` Python SDK is separate from the
+`cloudflared` executable and is not used by this project. Cloudflared is optional
+for localhost tests or an existing HTTPS proxy supplied through `--origin`.
+
+### Garuda / Arch Linux
+
+Install from the distribution repositories:
+
+```bash
+sudo pacman -Syu --needed python dosbox cloudflared
+```
+
+Both [DOSBox](https://archlinux.org/packages/extra/x86_64/dosbox/) and
+[cloudflared](https://archlinux.org/packages/extra/x86_64/cloudflared/) are in
+Arch's Extra repository; an AUR helper is not needed for these packages.
+
+### Ubuntu 22.04+ / Debian 12+
+
+Install Python, DOSBox and the tools needed to add Cloudflare's repository:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y python3 dosbox curl ca-certificates
+```
+
+Install cloudflared from Cloudflare's signed stable repository:
+
+```bash
+sudo mkdir -p --mode=0755 /usr/share/keyrings
+curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg \
+  | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main' \
+  | sudo tee /etc/apt/sources.list.d/cloudflared.list
+sudo apt-get update
+sudo apt-get install -y cloudflared
+```
+
+These repository/key commands follow the
+[official Cloudflare package instructions](https://pkg.cloudflare.com/).
+The launcher creates the temporary tunnel itself; Quick Tunnel mode requires
+no Cloudflare login, API token, domain, or system service. See
+[Cloudflare Quick Tunnels](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/).
+
+### Check the installation
+
+From the repository root:
+
+```bash
+python3 --version
+/usr/bin/cloudflared --version
+test -x /usr/bin/dosbox && echo 'DOSBox executable found'
+test -f dos-tools/MASM.EXE && test -f dos-tools/ML.EXE \
+  && test -f dos-tools/LINK.EXE && echo 'Supplied DOS tools found'
+```
+
+If a dependency was installed in a different location, adjust the executable
+paths in `build_maze4.py` and `run_maze4.py` before running. After these checks,
+continue with **Build and run** below. Phones need only a current web browser
+and internet access.
+
+### Optional tools for verification
+
+The Python/DOSBox test suite uses `unittest` from Python's standard library.
+Install Node.js to run the separate controller JavaScript checks:
+
+```bash
+# Garuda / Arch
+sudo pacman -Syu --needed nodejs
+
+# Ubuntu / Debian
+sudo apt-get install -y nodejs
+```
+
+The physical Android acceptance script additionally uses ADB, KDE Plasma's
+`qdbus6`, `xdotool`, and Spectacle. It is tailored to a KDE Plasma desktop with
+X11/XWayland input automation. On Garuda/Arch, install its tools with:
+
+```bash
+sudo pacman -Syu --needed android-tools qt6-tools xdotool spectacle
+```
+
+For that optional test, enable USB debugging on the Android phone, connect it
+by USB, accept the debugging authorization prompt, and check the connection:
+
+```bash
+adb devices -l
+```
+
+Use the serial shown with status `device` when invoking the acceptance script.
+Pass `--adb "$(command -v adb)"` to use the distro-installed executable; the
+script's default path is `/opt/android-sdk/platform-tools/adb`. ADB automates
+the phone UI during testing; movement requests still travel over public HTTPS.
+
 ## Build and run
 
 From the repository root:
@@ -43,7 +150,7 @@ The password is also displayed in DOSBox. Players enter a printable ASCII name
 of 1–8 characters, join, and press **Ready**. The host presses **Space** on the
 PC when at least two players are ready.
 
-`cloudflared` is already installed and is reused. No Cloudflare account,
+Once installed, `cloudflared` is reused by the launcher. No Cloudflare account,
 Cloudflare Python SDK calls, API key, router port forwarding, Android app,
 USB connection, or ADB forwarding is required for this temporary tunnel mode.
 The local Python bridge binds only to `127.0.0.1`. The HTTPS tunnel exposes its
@@ -256,7 +363,7 @@ instrumentation, never a player transport.
 For the opt-in physical-phone acceptance run, with the phone available:
 
 ```bash
-python3 tests/maze4/phone_acceptance.py --device YOUR_ADB_SERIAL
+python3 tests/maze4/phone_acceptance.py --device YOUR_ADB_SERIAL --adb "$(command -v adb)"
 ```
 
 This starts its own temporary test room, authenticates the phone via its visible

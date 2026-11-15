@@ -1,4 +1,4 @@
-; Question 1 - beginner version
+; Question 1
 ; Read 10 bytes, calculate (value * 5) + 10, and transfer the results.
 
 STACKSEG SEGMENT PARA STACK 'STACK'
@@ -26,6 +26,9 @@ CODESEG SEGMENT PARA PUBLIC 'CODE'
     ASSUME CS:CODESEG, DS:DATASEG, SS:STACKSEG
 
 START:
+    ; x86 hardware does not allow loading a segment register directly with an immediate
+    ; address, so DATASEG is moved into AX first and then transferred into DS. (Unlike CS
+    ; and SS, DOS does not automatically point DS to your data segment on .exe startup).
     MOV AX, DATASEG
     MOV DS, AX
 

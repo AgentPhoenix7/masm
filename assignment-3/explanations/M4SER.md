@@ -6,6 +6,9 @@ Source: [M4SER.INC](../M4SER.INC). Shared declarations:
 This is a standalone walkthrough of the serial/lifecycle include. Read the
 [MAZE4 overview](MAZE4.md) for the whole system, [M4CORE](M4CORE.md) for maze
 and collision algorithms, and [M4UI](M4UI.md) for the foreground loop and screen.
+Those are companion references for the same program. No earlier maze version
+or explanation is a prerequisite; the packet layouts, session states, and
+timing conventions used by this file are introduced below.
 
 The file contains **19 procedures**. Several procedures also contain named
 handlers, such as `RECEIVE_JOIN` and `LEASE_HELD`; those labels are not separate

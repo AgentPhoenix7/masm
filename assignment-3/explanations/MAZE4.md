@@ -7,10 +7,12 @@ For separate file-by-file walkthroughs, read [M4CORE](M4CORE.md) for game
 algorithms, [M4SER](M4SER.md) for communication and race lifecycle, and
 [M4UI](M4UI.md) for the main loop, keyboard interrupts, and rendering.
 
-Read [MAZE3](MAZE3.md) first if simultaneous movement and collision penalties
-are new to you. This guide follows the actual source, including the procedures
-inserted by `INCLUDE`. It explains the program; it does not report a new game
-or physical-phone test.
+This is a self-contained explanation of the current MAZE4 program. No earlier
+maze program or explanation is required. The guide introduces its register,
+memory, movement, collision, and communication concepts where they are used.
+The 8085 comparisons assume only basic familiarity with that processor.
+It follows the actual source, including the procedures inserted by `INCLUDE`;
+it does not report a new game or physical-phone test.
 
 The task is:
 
@@ -51,11 +53,11 @@ HTTPS, DOSBox, BIOS, and DOS are additional layers, not 8085 instructions.
 | [M4CORE.INC guide](M4CORE.md) | Maze generation, BFS, starts, movement, collisions, scoring |
 | [M4SER.INC guide](M4SER.md) | COM1, packet parsing, players, leases, race clock |
 | [M4UI.INC guide](M4UI.md) | `MAIN`, host keys, keyboard ISR, text-screen drawing |
-| [phone/protocol.py](../phone/protocol.py) | Frame encoding/decoding and loopback transport |
-| [phone/bridge.py](../phone/bridge.py) | Browser authentication and HTTP-to-serial adaptation |
+| [protocol.py guide](protocol.md) | Frame encoding/decoding and loopback transport |
+| [bridge.py guide](bridge.md) | Browser authentication and HTTP-to-serial adaptation |
 | [phone/controller.js](../phone/controller.js) | Buttons, requests, releases, status display |
-| [build_maze4.py](../build_maze4.py) | Build using supplied DOS tools |
-| [run_maze4.py](../run_maze4.py) | Start and supervise the cooperating processes |
+| [build_maze4.py guide](build_maze4.md) | Build using supplied DOS tools |
+| [run_maze4.py guide](run_maze4.md) | Start and supervise the cooperating processes |
 
 The includes are source insertion, not separately running programs.
 After assembly, their procedures belong to the same executable.
@@ -77,6 +79,43 @@ The stack reservation is `1000H = 4096` bytes.
 Although the machine has 16-bit general registers, the program can represent
 32-bit quantities in memory and manipulate them as two 16-bit words.
 You already use the same general technique on 8085 when one byte is too small.
+
+The registers used throughout this guide have these roles:
+
+| Register | Meaning here |
+| --- | --- |
+| `AX`, `BX`, `CX`, `DX` | 16-bit general registers |
+| `AH`/`AL`, `BH`/`BL`, `CH`/`CL`, `DH`/`DL` | High/low eight-bit halves of those registers |
+| `SI`, `DI` | Source/destination offsets and array indices |
+| `BP` | A general working/index register whose memory addressing normally uses `SS` |
+| `CS:IP` | Segment and offset of the instruction being executed |
+| `DS` | Segment used for ordinary shared-data accesses |
+| `ES` | Destination segment for string stores and copies |
+| `SS:SP` | Segment and offset of the CPU stack |
+
+For example, `AX=1234H` means `AH=12H` and `AL=34H`. Changing `AL` changes
+the low byte of `AX`; it does not create a separate unrelated value.
+The notation `DX:AX` joins two registers into one mathematical 32-bit value,
+with `DX` as the high word. It is different from a segment:offset address.
+
+In real-mode addressing, a segment:offset pair selects physical address
+`segment*16+offset`. A data access such as `MAZE[BX]` adds `BX` to the offset
+of `MAZE` within `DS`. The program must load the segment registers at runtime;
+declaring `.DATA` does not execute a CPU register load.
+
+`CALL` saves a return address on `SS:SP`; a near `RET` restores the return
+offset within the same code segment. `PUSH` and `POP` save/restore words in
+last-in, first-out order. `PROC`, `ENDP`, `INCLUDE`, and `END MAIN` are
+assembler declarations rather than instructions performed by the game.
+The linked DOS executable supplies its initial stack and entry point to the
+loader; `MAIN` then initializes the data registers.
+
+`CMP` updates flags as a subtraction would, without storing the difference.
+`JE`/`JNE` test equality, and `JB`/`JAE` test unsigned below/at-least relations.
+`LOOP` decrements `CX` and branches if the resulting count is nonzero,
+independently of the arithmetic zero flag. Entering such a loop with zero
+would wrap the counter, so routines using it need a valid nonzero count or
+an explicit guard. Later sections identify those assumptions.
 
 ## 4. Maze dimensions and linear addresses
 
@@ -896,7 +935,9 @@ for values 10–15 to obtain `'A'`–`'F'`.
 `HEX_BYTE` saves the original byte, emits its high nibble first, then its low
 nibble. A `4FH` byte becomes the characters `'4'`, `'F'`.
 
-These are close to the nibble manipulation ideas in Assignment 1.
+A nibble is four bits, so a byte contains a high nibble and a low nibble.
+Shifting right by four exposes the high nibble; masking with `0FH` keeps the
+low nibble. Each value 0–15 is then represented by one hexadecimal character.
 ASCII `'4'` is `34H`; it is not the numeric nibble value 4.
 
 ## 44. `SEND_PACKET`: encode a complete frame

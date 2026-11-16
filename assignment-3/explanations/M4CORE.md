@@ -11,6 +11,9 @@ start cells, movement proposals, collision decisions, warnings, and scores are
 calculated. Examples are source-derived traces, not reports of a new DOSBox or
 phone test.
 
+No earlier maze version or guide is required. Shared storage, traversal
+algorithms, movement proposals, and collision episodes are introduced below.
+
 You can read this file as an extension of an 8085 array-processing exercise:
 the program still loads memory, compares values, follows pointers, and updates
 counters. The larger algorithms arise from combining those operations with

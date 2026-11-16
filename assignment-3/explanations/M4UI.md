@@ -11,6 +11,8 @@ and inserts this file into the executable.
 This is a detailed guide to the UI module itself.
 It follows the actual instructions and assumes you already understand basic
 8085 registers, flags, pointers, loops, subroutines, and interrupts.
+No earlier maze version or guide is required. The MAZE4-specific state,
+calling conventions, input representation, and video layout are introduced here.
 It does not report a newly assembled executable or a fresh phone/game test.
 
 The module's three jobs are:
@@ -118,8 +120,8 @@ KEY_EDGE[k] = 1 → a press occurred and the foreground has not consumed it
 A release clears `KEY_DOWN`, but does not clear `KEY_EDGE`.
 A tap can therefore survive the interval between two foreground checks.
 
-Unlike `KEY_PENDING` in the earlier maze versions, `KEY_EDGE` is a Boolean
-latch, not a count.
+`KEY_EDGE` is a Boolean latch: its stored values are zero or one, rather than
+the number of presses waiting to be consumed.
 Several complete taps before consumption can merge into one pending action.
 
 The intended host behavior is one action per observed new press, rather than

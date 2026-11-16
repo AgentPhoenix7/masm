@@ -222,7 +222,7 @@ fallback when a release packet cannot arrive.
 
 Two selectable collision techniques are implemented:
 
-1. **Block + penalty** (default, same rules as MAZE3): same-target or head-on
+1. **Block + penalty** (default): same-target or head-on
    contacts block movement and add
    3.0 seconds to each player once per contact episode. Continuing the same
    contact does not repeatedly charge; separating/releasing ends the episode.

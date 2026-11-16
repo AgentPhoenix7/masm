@@ -3,6 +3,10 @@
 Source: [MAZE4.ASM](../MAZE4.ASM), [M4CORE.INC](../M4CORE.INC),
 [M4SER.INC](../M4SER.INC), and [M4UI.INC](../M4UI.INC).
 
+For separate file-by-file walkthroughs, read [M4CORE](M4CORE.md) for game
+algorithms, [M4SER](M4SER.md) for communication and race lifecycle, and
+[M4UI](M4UI.md) for the main loop, keyboard interrupts, and rendering.
+
 Read [MAZE3](MAZE3.md) first if simultaneous movement and collision penalties
 are new to you. This guide follows the actual source, including the procedures
 inserted by `INCLUDE`. It explains the program; it does not report a new game
@@ -44,9 +48,9 @@ HTTPS, DOSBox, BIOS, and DOS are additional layers, not 8085 instructions.
 | File | Responsibility |
 | --- | --- |
 | `MAZE4.ASM` | Processor model, constants, shared arrays, includes |
-| `M4CORE.INC` | Maze generation, BFS, starts, movement, collisions, scoring |
-| `M4SER.INC` | COM1, packet parsing, players, leases, race clock |
-| `M4UI.INC` | `MAIN`, host keys, keyboard ISR, text-screen drawing |
+| [M4CORE.INC guide](M4CORE.md) | Maze generation, BFS, starts, movement, collisions, scoring |
+| [M4SER.INC guide](M4SER.md) | COM1, packet parsing, players, leases, race clock |
+| [M4UI.INC guide](M4UI.md) | `MAIN`, host keys, keyboard ISR, text-screen drawing |
 | [phone/protocol.py](../phone/protocol.py) | Frame encoding/decoding and loopback transport |
 | [phone/bridge.py](../phone/bridge.py) | Browser authentication and HTTP-to-serial adaptation |
 | [phone/controller.js](../phone/controller.js) | Buttons, requests, releases, status display |

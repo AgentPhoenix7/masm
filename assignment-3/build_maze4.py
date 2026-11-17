@@ -12,13 +12,13 @@ SOURCES = ("MAZE4.ASM", "M4CORE.INC", "M4SER.INC", "M4UI.INC")
 
 
 def environment():
-    tmp = ROOT / ".scratch" / "tmp"
+    tmp = ROOT / "build" / "maze4" / "tmp"
     tmp.mkdir(parents=True, exist_ok=True)
     return dict(os.environ, TMPDIR=str(tmp), TMP=str(tmp), TEMP=str(tmp))
 
 
 def build():
-    stage = ROOT / ".scratch" / "maze4-phone" / "build"
+    stage = ROOT / "build" / "maze4" / "assembly"
     stage.mkdir(parents=True, exist_ok=True)
     (stage / "TMP").mkdir(exist_ok=True)
     tools = ROOT / "dos-tools"

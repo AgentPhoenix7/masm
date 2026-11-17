@@ -125,7 +125,7 @@ The build uses **only the supplied binaries in `dos-tools/`**, mounted as `T:`
 in the installed DOSBox. The supplied `MASM.EXE` is a compatibility driver that
 invokes the supplied `ML.EXE`; the supplied `LINK.EXE` links the DOS executable.
 No downloaded or host-native assembler/linker substitutes are used. Build logs
-and intermediate OBJ files go to `.scratch/maze4-phone/build/`; the fresh final
+and intermediate OBJ files go to `build/maze4/assembly/`; the fresh final
 executable is copied to `assignment-3/MAZE4.EXE`. The launcher rebuilds when a
 source/include is newer than that executable.
 
@@ -354,7 +354,7 @@ For a credential-free host state trace during phone testing:
 SDL_VIDEODRIVER=x11 python3 assignment-3/run_maze4.py --internet --state-trace
 ```
 
-The trace is `.scratch/maze4-phone/run/state.json`. X11 is useful for synthetic
+The trace is `build/maze4/run/state.json`. X11 is useful for synthetic
 host key tests on KDE/Wayland; the default launcher supports normal physical
 keyboard play. ADB may open the public HTTPS page and tap its buttons. **Do not
 use `adb reverse` or HTTP forwarding for this acceptance test.** ADB is test
@@ -370,7 +370,7 @@ This starts its own temporary test room, authenticates the phone via its visible
 browser UI, adds three independent clients, tests movement and tunnel loss,
 and closes its own processes. It does not change Wi-Fi/mobile-data settings.
 Android UI inspection needs a temporary on-device XML dump; the test pulls it
-into project scratch and removes only that dump afterward. It does not use
+into `build/maze4/acceptance/` and removes only that dump afterward. It does not use
 phone browser DevTools. Run this separately from an existing game on port 8080.
 
 Current verification results and evidence, including external-service test

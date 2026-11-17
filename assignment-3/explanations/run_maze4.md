@@ -287,12 +287,12 @@ creation/binding can still reject an unusable port.
 ## 15. Paths created by the launcher
 
 ```python
-scratch = HERE.parent / ".scratch" / "maze4-phone" / "run"
-scratch.mkdir(parents=True, exist_ok=True)
+run_dir = HERE.parent / "build" / "maze4" / "run"
+run_dir.mkdir(parents=True, exist_ok=True)
 exe = HERE / "MAZE4.EXE"
 ```
 
-In this checkout the run directory is `/home/agntdrgn/Projects/masm/.scratch/maze4-phone/run`. `parents=True` creates
+In this checkout the run directory is `/home/agntdrgn/Projects/masm/build/maze4/run`. `parents=True` creates
 missing parent directories. `exist_ok=True` permits an already existing directory. The launcher does not remove
 artifacts from earlier runs first.
 
@@ -318,7 +318,7 @@ condition. A missing source encountered during `stat()` raises an error.
 
 ## 17. What the imported build does
 
-The build helper stages assembly inputs under project scratch, uses supplied MASM/ML/LINK DOS executables through a
+The build helper stages assembly inputs under `build/maze4/assembly`, uses supplied MASM/ML/LINK DOS executables through a
 build DOSBox, checks the resulting executable and build report, and copies `MAZE4.EXE` back beside the launcher.
 
 This is a synchronous call: game transport setup waits for it to finish. The build DOSBox is separate from the game
@@ -449,13 +449,13 @@ before advertising the phone address.
 ## 24. Create the log and connect the generated COM1 configuration
 
 ```python
-log = stack.enter_context((scratch / "dosbox.log").open("w"))
-conf = scratch / "phone.conf"
+log = stack.enter_context((run_dir / "dosbox.log").open("w"))
+conf = run_dir / "phone.conf"
 text = (HERE / "PHONE4.CONF").read_text().replace("port:8766", f"port:{link.port}")
 ```
 
 Opening with `"w"` truncates the previous game log. `enter_context` registers file closure on the cleanup stack. The
-configuration is copied as text and modified in scratch. The source `PHONE4.CONF` is not overwritten. The replacement is
+configuration is copied as text and modified in the run directory. The source `PHONE4.CONF` is not overwritten. The replacement is
 textual and replaces all exact occurrences.
 
 The source configuration contains:
@@ -485,18 +485,18 @@ This is intended for automated execution without an interactive display. It does
 player inputs. It also does not make the launcher exit automatically after a test duration.
 
 The imported `environment()` returns inherited environment variables with `TMPDIR`, `TMP`, and `TEMP` set to the
-project's `.scratch/tmp`. It creates that directory as needed.
+project's `build/maze4/tmp`. It creates that directory as needed.
 
 The game child receives `dosenv`; cloudflared receives a separate call to `environment()` later. Headless SDL overrides
 are added only to `dosenv` here. The launcher does not replace its entire parent environment globally. Build staging,
-run artifacts, and temporary storage have different subpaths. All remain under the same repository's `.scratch`
+run artifacts, and temporary storage have different subpaths. All remain under the same repository's `build/maze4`
 directory.
 
 ## 26. Start DOSBox with an argument list and captured logs
 
 ```text
 /usr/bin/dosbox
-  -conf <scratch>/phone.conf
+  -conf <run_dir>/phone.conf
   -noautoexec
   -c 'mount c "<assignment-3>"'
   -c 'c:'
@@ -557,7 +557,7 @@ if args.internet:
 
 Both `--origin` and `--local-test` keep `tunnel=None`. They do not create a tunnel reader, readiness Event, tunnel log,
 or empty cloudflared configuration during this invocation. Old files from an earlier internet invocation may still exist
-in scratch. Their presence alone does not prove that this run used a tunnel.
+in the run directory. Their presence alone does not prove that this run used a tunnel.
 
 ```text
 phone browser --HTTPS--> public tunnel/proxy endpoint
@@ -575,9 +575,9 @@ forwarding target are compatible. ADB does not participate in this traffic path.
 ## 29. Internet mode: configuration, log, and cloudflared command
 
 ```python
-empty = scratch / "empty-cloudflared.yml"
+empty = run_dir / "empty-cloudflared.yml"
 empty.write_text("{}\n")
-tunnel_log = stack.enter_context((scratch / "tunnel.log").open("w"))
+tunnel_log = stack.enter_context((run_dir / "tunnel.log").open("w"))
 ```
 
 The launcher supplies this file with `--config`. Its contents are an empty YAML mapping. The command therefore points at
@@ -586,7 +586,7 @@ launcher neither creates a permanent tunnel definition nor saves credentials.
 
 ```text
 /usr/bin/cloudflared tunnel
-  --config <scratch>/empty-cloudflared.yml
+  --config <run_dir>/empty-cloudflared.yml
   --no-autoupdate
   --url http://127.0.0.1:<http-port>
 ```
@@ -689,7 +689,7 @@ check. This is why the explanation must not promise exact forty-second terminati
 
 ```python
 if app.origin is None:
-    raise RuntimeError(f"HTTPS tunnel did not start; see {scratch / 'tunnel.log'}")
+    raise RuntimeError(f"HTTPS tunnel did not start; see {run_dir / 'tunnel.log'}")
 ```
 
 The success criterion here is that a public origin has been installed. EOF without the banner/registration pair leaves
@@ -721,7 +721,7 @@ def trace_state():
 ```
 
 The function is always supplied as `on_tick`, even when tracing is disabled. Its early return makes those calls
-inexpensive in the default mode. It closes over `args`, `link`, and `scratch`. It has no arguments and no meaningful
+inexpensive in the default mode. It closes over `args`, `link`, and `run_dir`. It has no arguments and no meaningful
 return value. Tracing begins only after startup reaches `monitor_game`.
 
 ```python
@@ -747,8 +747,8 @@ anonymizer for all personal or future state fields.
 ## 36. Snapshot replacement, stale files, and log-redaction limits
 
 ```python
-target = scratch / "state.json"
-temporary = scratch / "state.new"
+target = run_dir / "state.json"
+temporary = run_dir / "state.new"
 temporary.write_text(json.dumps(trace, indent=2))
 temporary.replace(target)
 ```
@@ -773,7 +773,7 @@ reader. Neither stream is passed through the state-trace redaction comprehension
 The bridge disables ordinary HTTP request logging to avoid recording credentials, cookies, bodies, and arbitrary
 requested URLs through that path. The room password is intentionally printed to the host terminal.
 
-Do not infer that every terminal capture and every scratch log is secret-free because `--state-trace` describes
+Do not infer that every terminal capture and every runtime log is secret-free because `--state-trace` describes
 credential-free assembly snapshots.
 
 ## 37. `tunnel_outage()` and the final monitor call
@@ -883,7 +883,7 @@ re-raised in `main()`. These are limits of the checked-in exception structure, n
 
 ```text
 python run_maze4.py --local-test
-parse → scratch → rebuild if needed → install SIGTERM handler
+parse → create run directory → rebuild if needed → install SIGTERM handler
 serial listener → App(http://127.0.0.1:8080) → HTTP thread
 game log/config → DOSBox → wait capacity≥2
 configure room/password → maintenance thread
@@ -961,13 +961,13 @@ is supported by using the recorded `link.port`.
 
 HTTP port zero has no equivalent origin/forward-target correction here: the server can bind an OS-selected port while
 the launcher still formats `:0`. Use an explicit usable HTTP port for the documented operating modes. Do not run
-multiple sessions against these shared scratch filenames.
+multiple sessions against these shared runtime filenames.
 
 ## 46. Whole-launcher pseudocode
 
 ```text
 parse exactly one mode and optional settings
-create run scratch; rebuild executable if forced, absent, or older than sources
+create run directory; rebuild executable if forced, absent, or older than sources
 install SIGTERM → KeyboardInterrupt
 with dynamic cleanup stack:
     create serial listener; register close

@@ -76,11 +76,11 @@ def main():
     parser.add_argument(
         "--state-trace",
         action="store_true",
-        help="Save credential-free MASM state under project scratch for testing",
+        help="Save credential-free MASM state in build/maze4/run for testing",
     )
     args = parser.parse_args()
-    scratch = HERE.parent / ".scratch" / "maze4-phone" / "run"
-    scratch.mkdir(parents=True, exist_ok=True)
+    run_dir = HERE.parent / "build" / "maze4" / "run"
+    run_dir.mkdir(parents=True, exist_ok=True)
     exe = HERE / "MAZE4.EXE"
     if (
         args.rebuild
@@ -115,8 +115,8 @@ def main():
         thread.start()
         stack.callback(server.server_close)
         stack.callback(server.shutdown)
-        log = stack.enter_context((scratch / "dosbox.log").open("w"))
-        conf = scratch / "phone.conf"
+        log = stack.enter_context((run_dir / "dosbox.log").open("w"))
+        conf = run_dir / "phone.conf"
         text = (
             (HERE / "PHONE4.CONF").read_text().replace("port:8766", f"port:{link.port}")
         )
@@ -151,9 +151,9 @@ def main():
         app.start()
         tunnel = None
         if args.internet:
-            empty = scratch / "empty-cloudflared.yml"
+            empty = run_dir / "empty-cloudflared.yml"
             empty.write_text("{}\n")
-            tunnel_log = stack.enter_context((scratch / "tunnel.log").open("w"))
+            tunnel_log = stack.enter_context((run_dir / "tunnel.log").open("w"))
             tunnel = subprocess.Popen(
                 [
                     "/usr/bin/cloudflared",
@@ -195,7 +195,7 @@ def main():
                     raise RuntimeError("DOSBox exited before tunnel startup")
             if app.origin is None:
                 raise RuntimeError(
-                    f"HTTPS tunnel did not start; see {scratch / 'tunnel.log'}"
+                    f"HTTPS tunnel did not start; see {run_dir / 'tunnel.log'}"
                 )
         print(f"Phone address: {app.origin}", flush=True)
         print(
@@ -217,8 +217,8 @@ def main():
                     {k: v for k, v in p.items() if k != "owner"}
                     for p in current["players"]
                 ]
-                target = scratch / "state.json"
-                temporary = scratch / "state.new"
+                target = run_dir / "state.json"
+                temporary = run_dir / "state.new"
                 temporary.write_text(json.dumps(trace, indent=2))
                 temporary.replace(target)
             except TransportError:

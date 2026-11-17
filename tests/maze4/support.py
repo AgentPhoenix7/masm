@@ -7,17 +7,17 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / "assignment-3"
-SCRATCH = ROOT / ".scratch" / "maze4-phone"
+TEST_OUTPUT = ROOT / "build" / "maze4" / "tests"
 
 
 def env():
-    tmp = ROOT / ".scratch" / "tmp"
+    tmp = ROOT / "build" / "maze4" / "tmp"
     tmp.mkdir(parents=True, exist_ok=True)
     return dict(os.environ, TMPDIR=str(tmp), TMP=str(tmp), TEMP=str(tmp))
 
 
 def build(name="MAZE4", harness=None, directory=None, execute=True):
-    stage = directory or SCRATCH / name.lower()
+    stage = directory or TEST_OUTPUT / name.lower()
     stage.mkdir(parents=True, exist_ok=True)
     for p in SOURCE.glob("*.INC"):
         shutil.copy2(p, stage / p.name)

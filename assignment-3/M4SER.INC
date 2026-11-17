@@ -13,120 +13,138 @@
 .DATA
 ; Phase and epoch separate lobby/racing/results and different room lifetimes.
 ; GENERATION distinguishes regenerated maps within a room; owners are per-slot.
+; Game State Management
 PHASE DB 1                       ; 1 lobby, 2 race, 3 results
-EPOCH DW 1
-GENERATION DW 1
-PLAYER_COUNT DB 0
-READY DB 8 DUP(0)
-OWNER_IDS DW 8 DUP(0)
-PLAYER_NAMES DB 64 DUP(32)
+EPOCH DW 1 ; Identifies the current room session.
+GENERATION DW 1 ; Tracks map regeneration.
+PLAYER_COUNT DB 0 ; Number of connected players.
+; Player Information
+READY DB 8 DUP(0) ; Readiness status of 8 players.
+OWNER_IDS DW 8 DUP(0) ; Unique owner ID for each player slot.
+PLAYER_NAMES DB 64 DUP(32) ; Stores 8 player names, each occupying 8 bytes.
 ; Session liveness, direction freshness and input sequencing have separate
 ; word arrays. READY/HELD/TAPS are bytes; names are eight-byte padded records.
-LAST_SEEN DW 8 DUP(0)
-LAST_DIRECTION DW 8 DUP(0)
-LAST_SEQUENCE DW 8 DUP(0)
-HAVE_SEQUENCE DB 8 DUP(0)
-HELD DB 8 DUP(0)
-TAPS DB 8 DUP(0)
-ROOM_CODE DB '------------',0
-SYSTEM_TICK DW 0
-LAST_BIOS DD 0
-ELAPSED_TICKS DD 0
-FRAME_TICKS DW 0
-STATE_TICK DW 0FFFFH
+; Player Input and Connection Tracking
+LAST_SEEN DW 8 DUP(0) ; Tracks when each player was last active.
+LAST_DIRECTION DW 8 DUP(0) ; Tracks freshness of direction inputs.
+LAST_SEQUENCE DW 8 DUP(0) ; Stores the last input sequence number.
+HAVE_SEQUENCE DB 8 DUP(0) ; Indicates whether a sequence number has been received.
+HELD DB 8 DUP(0) ; Stores currently held movement inputs.
+TAPS DB 8 DUP(0) ; Stores movement button taps.
+; Room and Game Timing
+ROOM_CODE DB '------------',0 ; Stores the multiplayer room code.
+SYSTEM_TICK DW 0 ; Internal timing counter.
+LAST_BIOS DD 0 ; Previous BIOS timer value.
+ELAPSED_TICKS DD 0 ; Total elapsed game ticks.
+FRAME_TICKS DW 0 ; Tracks frame timing.
+STATE_TICK DW 0FFFFH ; Tracks game-state update timing.
 ; Receive state retains partial hex pairs/checksum across nonblocking polls.
 ; The decoded size includes checksum until POLL_END removes that last byte.
-RX_BUFFER DB 96 DUP(0)
-RX_SIZE DW 0
-RX_ACTIVE DB 0
-RX_HALF DB 0
-RX_HIGH DB 0
-RX_CHECK DB 0
+; Serial Data Reception (RX)
+RX_BUFFER DB 96 DUP(0) ; Stores received bytes.
+RX_SIZE DW 0 ; Number of received bytes.
+RX_ACTIVE DB 0 ; Indicates whether a message is being received.
+RX_HALF DB 0 ; Tracks whether half of a hexadecimal byte has arrived.
+RX_HIGH DB 0 ; Stores the first hexadecimal digit.
+RX_CHECK DB 0 ; Maintains the XOR checksum.
 ; TX_HEAD/TX_TAIL delimit unsent encoded bytes. OUT_BUFFER stages one
 ; binary payload; BACKUP_MAP/META support lobby regeneration rollback.
-TX_BUFFER DB 2048 DUP(0)
+; Serial Data Transmission (TX)
+TX_BUFFER DB 2048 DUP(0) ; Queue of encoded bytes waiting to be transmitted.
+; Manage the transmission queue.
 TX_HEAD DW 0
 TX_TAIL DW 0
-TX_CHECK DB 0
-OUT_BUFFER DB 256 DUP(0)
-OUT_SIZE DW 0
-ACK_CODE DB 0
-ACK_SLOT DB 0FFH
-SER_BUDGET DW 0
-TEMP_SEQ DW 0
-BACKUP_MAP DB CELLS DUP(0)
-BACKUP_META DB 23 DUP(0)
+TX_CHECK DB 0 ; Stores the outgoing XOR checksum.
+OUT_BUFFER DB 256 DUP(0) ; Temporarily stores a binary message before encoding.
+OUT_SIZE DW 0 ; Size of the outgoing message.
+; Acknowledgement and Backup
+ACK_CODE DB 0 ; Stores acknowledgement status.
+ACK_SLOT DB 0FFH ; Identifies the relevant player slot; FFH initially indicates no slot.
+SER_BUDGET DW 0 ; Limits serial processing work.
+TEMP_SEQ DW 0 ; Temporarily stores a sequence number.
+BACKUP_MAP DB CELLS DUP(0) ; Saves the previous map.
+BACKUP_META DB 23 DUP(0) ; Saves map metadata for rollback.
 ; Begin executable code. CALL saves a return address on SS:SP; RET resumes
 ; after that call. PROC/ENDP are assembler declarations, not run-time actions.
 .CODE
+; Initializes the COM1 serial port for communication between the MASM racing game and the host bridge.
+; 115200 baud, 8N1 (8 data bits, no parity, 1 stop bit), with interrupts disabled.
+; Baud Rate Calculation:
+; Baud Rate = 115200 / Divisor
+; Here, divisor = 1.
+; Baud Rate = 115200 bps
 SERIAL_INIT PROC NEAR
     ; COM1 ports begin at 3F8H. Disable UART interrupts at 3F9H, set DLAB
     ; in 3FBH to access the baud divisor, then write divisor 1 (115200 baud).
     ; Clear DLAB with line control 3: 8 data bits, no parity, one stop bit.
     ; Modem control 3 asserts DTR/RTS; foreground code polls rather than using IRQ4.
     ; UART: 115200, 8N1, interrupts off; polled by the main loop.
-    MOV DX,3F9H
-    XOR AL,AL
-    OUT DX,AL
-    MOV DX,3FBH
-    MOV AL,80H
-    OUT DX,AL
-    MOV DX,3F8H
-    MOV AL,1
-    OUT DX,AL
-    INC DX
-    XOR AL,AL
-    OUT DX,AL
-    MOV DX,3FBH
-    MOV AL,3
-    OUT DX,AL
-    MOV DX,3FCH
-    MOV AL,3
-    OUT DX,AL
+    MOV DX,3F9H ; Selects the UART interrupt enable register (IER).
+    XOR AL,AL ; Sets AL = 0.
+    OUT DX,AL ; Disables UART interrupts.
+    MOV DX,3FBH ; Selects the Line Control Register (LCR).
+    MOV AL,80H ; Sets DLAB = 1 to access baud-rate registers.
+    OUT DX,AL ; Enables divisor register access.
+    MOV DX,3F8H ; Selects the divisor low-byte register.
+    MOV AL,1 ; Sets divisor low byte = 1.
+    OUT DX,AL ; Writes divisor low byte.
+    INC DX ; Moves to port 3F9H (divisor high byte).
+    XOR AL,AL ; Sets AL = 0.
+    OUT DX,AL ; Writes divisor high byte = 0.
+    MOV DX,3FBH ; Selects the Line Control Register again.
+    MOV AL,3 ; Configures 8 data bits, no parity, 1 stop bit; clears DLAB.
+    OUT DX,AL ; Applies the 8N1 configuration.
+    MOV DX,3FCH ; Selects the Modem Control Register (MCR).
+    MOV AL,3 ; Sets DTR and RTS signals.
+    OUT DX,AL ; Activates DTR and RTS.
     RET
 SERIAL_INIT ENDP
 
 ; Queue output without blocking game time. A snapshot is skipped if congested.
+; Adds a character stored in register AL to the serial transmission buffer (TX_BUFFER) without immediately transmitting it.
 QUEUE_CHAR PROC NEAR
     ; Append AL at TX_TAIL if the fixed 2048-byte staging buffer has room.
     ; This is a linear queue reset only when drained, not a circular ring.
     ; BX is preserved; a full queue silently skips the character, so packet
     ; callers must reserve enough room for a complete frame before starting.
-    PUSH BX
-    MOV BX,TX_TAIL
-    CMP BX,2048
-    JAE QUEUE_FULL
-    MOV TX_BUFFER[BX],AL
-    INC TX_TAIL
+    PUSH BX ; Saves the original value of BX.
+    MOV BX,TX_TAIL ; Loads the next available buffer position into BX.
+    CMP BX,2048 ; Checks whether the buffer has reached its maximum capacity.
+    JAE QUEUE_FULL ; Jumps if BX ≥ 2048, meaning the buffer is full.
+    MOV TX_BUFFER[BX],AL ; Stores the character from AL at position BX.
+    INC TX_TAIL ; Advances the tail pointer to the next position.
 QUEUE_FULL:
     ; Restore BX and return without blocking for UART transmission.
-    POP BX
+    POP BX ; Restores the original BX value.
     RET
 QUEUE_CHAR ENDP
+; Converts the lowest 4 bits (nibble) of AL into an uppercase hexadecimal ASCII character (0-9, A-F) and adds it to the transmission queue using QUEUE_CHAR.
 HEX_NIBBLE PROC NEAR
     ; Keep AL's low four bits, add ASCII '0', then add seven for A..F after
     ; 9. Queue the resulting uppercase character; this helper changes AL.
-    AND AL,0FH
-    ADD AL,'0'
-    CMP AL,'9'
-    JBE HEX_CHAR
-    ADD AL,7
+    AND AL,0FH ; Keeps only the lowest 4 bits of AL (value 0-15).
+    ADD AL,'0' ; Converts values 0-9 into ASCII characters.
+    CMP AL,'9' ; Checks whether the result is within 0-9.
+    JBE HEX_CHAR ; If AL ≤ '9', jumps to HEX_CHAR.
+    ADD AL,7 ; Converts values 10-15 into ASCII A-F.
 HEX_CHAR:
     ; Append this single hexadecimal digit to the outgoing byte queue.
-    CALL QUEUE_CHAR
+    CALL QUEUE_CHAR ; Adds the hexadecimal character to TX_BUFFER.
     RET
 HEX_NIBBLE ENDP
 HEX_BYTE PROC NEAR
     ; Save AX/CX, keep the original byte in AH, and emit its high nibble
     ; then low nibble. A four-bit shift exposes the high nibble in AL.
+    ; Saves the original registers.
     PUSH AX
     PUSH CX
-    MOV AH,AL
-    MOV CL,4
-    SHR AL,CL
-    CALL HEX_NIBBLE
-    MOV AL,AH
-    CALL HEX_NIBBLE
+    MOV AH,AL ; Copies the original byte into AH.
+    MOV CL,4 ; Sets shift count to 4 bits.
+    SHR AL,CL ; Shifts AL right by 4 bits to extract the high nibble.
+    CALL HEX_NIBBLE ; Converts and queues the high nibble.
+    MOV AL,AH ; Restores the original byte from AH.
+    CALL HEX_NIBBLE ; Converts and queues the low nibble.
+    ; Restores the original registers.
     POP CX
     POP AX
     RET
@@ -136,102 +154,115 @@ SEND_PACKET PROC NEAR
     ; each byte while XOR-accumulating its checksum, encode the checksum,
     ; then queue LF (10). Total framing space is 2*payload_size+4 bytes.
     ; DS:SI payload, CX size. Caller guarantees 2*size+4 bytes of space.
+    ; Saves registers.
     PUSH AX
     PUSH SI
     PUSH CX
-    MOV AL,':'
-    CALL QUEUE_CHAR
-    MOV TX_CHECK,0
+    MOV AL,':' ; Loads the packet-start character :.
+    CALL QUEUE_CHAR ; Adds : to the transmission queue.
+    MOV TX_CHECK,0 ; Initializes the XOR checksum to zero.
 SEND_PACKET_BYTE:
     ; LODSB consumes one payload byte with forward DS:SI. XOR is independent
     ; of integer endianness here because it checks each raw byte individually.
-    LODSB
-    XOR TX_CHECK,AL
-    CALL HEX_BYTE
-    LOOP SEND_PACKET_BYTE
-    MOV AL,TX_CHECK
-    CALL HEX_BYTE
-    MOV AL,10
-    CALL QUEUE_CHAR
+    LODSB ; Loads one byte from DS:SI into AL and advances SI. CLD in M4UI.
+    XOR TX_CHECK,AL ; Updates the checksum using XOR.
+    CALL HEX_BYTE ; Converts the byte into two hexadecimal ASCII characters and queues them.
+    LOOP SEND_PACKET_BYTE ; Decrements CX and repeats while CX ≠ 0.
+    MOV AL,TX_CHECK ; Loads the final checksum into AL.
+    CALL HEX_BYTE ; Appends the checksum as two hexadecimal characters.
+    MOV AL,10 ; Loads ASCII LF (line feed).
+    CALL QUEUE_CHAR ; Adds LF to mark the end of the packet.
+    ; Restores registers.
     POP CX
     POP SI
     POP AX
     RET
 SEND_PACKET ENDP
+; Sends queued characters from TX_BUFFER to the COM1 serial port, transmitting at most 512 bytes per call without blocking gameplay.
 SERIAL_FLUSH PROC NEAR
     ; Bound each flush to 512 bytes to share foreground time with gameplay.
     ; TX_HEAD is the next unsent index; TX_TAIL is one past the queued data.
-    MOV CX,512
+    MOV CX,512 ; Sets the maximum transmission limit to 512 bytes.
 FLUSH_NEXT:
     ; UART line-status port 3FDH bit 5 means transmit holding register empty.
     ; If not ready, return immediately; otherwise write the next queued byte
     ; to 3F8H, advance HEAD, and continue within the per-call budget.
-    MOV BX,TX_HEAD
-    CMP BX,TX_TAIL
-    JAE FLUSH_EMPTY
-    MOV DX,3FDH
-    IN AL,DX
-    TEST AL,20H
-    JZ FLUSH_DONE
-    MOV AL,TX_BUFFER[BX]
-    MOV DX,3F8H
-    OUT DX,AL
-    INC TX_HEAD
-    LOOP FLUSH_NEXT
+    MOV BX,TX_HEAD ; Gets the index of the next unsent byte.
+    CMP BX,TX_TAIL ; Checks whether any queued bytes remain.
+    JAE FLUSH_EMPTY ; Jumps if the queue is empty.
+    MOV DX,3FDH ; Selects the UART Line Status Register.
+    IN AL,DX ; Reads the UART status into AL.
+    TEST AL,20H ; Checks bit 5 (transmitter holding register empty).
+    JZ FLUSH_DONE ; Returns if the UART is not ready.
+    MOV AL,TX_BUFFER[BX] ; Loads the next queued character.
+    MOV DX,3F8H ; Selects the COM1 transmit data register.
+    OUT DX,AL ; Sends the character to the UART.
+    INC TX_HEAD ; Advances the queue's read position.
+    LOOP FLUSH_NEXT ; Repeats until 512 bytes have been sent or another exit condition occurs.
     RET
+; When all queued bytes have been processed, both pointers are reset to zero, allowing the entire 2048-byte buffer to be reused.
 FLUSH_EMPTY:
     ; Once HEAD reaches TAIL, reset both to zero so the whole buffer is reusable.
     MOV TX_HEAD,0
     MOV TX_TAIL,0
+; Returns immediately if the UART is not ready.
 FLUSH_DONE:
     ; Return without waiting for hardware; a later main-loop call resumes flushing.
     RET
 SERIAL_FLUSH ENDP
 
 ; Returns a nibble in AL, carry on invalid ASCII hex.
+; Converts an ASCII hexadecimal character (0-9, A-F) into its numeric value (0-15). It uses the Carry Flag (CF) to indicate whether the character is valid.
 PARSE_HEX PROC NEAR
     ; Convert ASCII 0..9 or uppercase A..F into AL=0..15 by subtracting
     ; '0' and the seven-code punctuation gap. Unsigned range tests reject
     ; other bytes, including lowercase. CF is the success/failure return channel.
-    SUB AL,'0'
-    CMP AL,9
-    JBE PARSE_HEX_OK
-    SUB AL,7
-    CMP AL,10
-    JB PARSE_HEX_BAD
-    CMP AL,15
-    JA PARSE_HEX_BAD
+    SUB AL,'0' ; Subtracts ASCII '0' (30H) to convert numeric characters.
+    CMP AL,9 ; Checks whether the result is between 0 and 9.
+    JBE PARSE_HEX_OK ; Jumps if AL ≤ 9 (unsigned comparison).
+    SUB AL,7 ; Adjusts the ASCII gap between digits and letters.
+    CMP AL,10 ; Checks whether the adjusted value is at least 10.
+    JB PARSE_HEX_BAD ; Rejects values below 10.
+    CMP AL,15 ; Checks whether the value exceeds 15.
+    JA PARSE_HEX_BAD ; Rejects values above 15.
 PARSE_HEX_OK:
     ; CLC explicitly clears carry for a valid nibble; RET leaves that flag intact.
-    CLC
+    CLC ; Clears Carry Flag (CF = 0), indicating valid input.
     RET
 PARSE_HEX_BAD:
     ; STC sets carry so the receiver can abandon malformed frame text.
-    STC
+    STC ; Sets Carry Flag (CF = 1), indicating invalid input.
     RET
 PARSE_HEX ENDP
+
+; Reads incoming bytes from COM1, converts hexadecimal characters into binary data, verifies the XOR checksum, and passes valid packets to RECEIVE_PACKET.
+; It processes at most 256 serial bytes per call to avoid blocking the game.
 SERIAL_POLL PROC NEAR
     ; Read at most 256 UART bytes per call, retaining partial-frame state
     ; between polls so slow or fragmented serial input does not block the game.
-    MOV SER_BUDGET,256
+    MOV SER_BUDGET,256 ; Limits processing to 256 incoming characters.
 POLL_BYTE:
     ; Line-status bit 0 means data ready. A colon resynchronizes immediately;
     ; bytes outside a frame are ignored. Inside a frame, LF finishes it and
     ; other characters must parse as hex. First nibble is shifted into bits 7..4.
-    MOV DX,3FDH
-    IN AL,DX
-    TEST AL,1
-    JZ POLL_DONE
-    MOV DX,3F8H
-    IN AL,DX
-    CMP AL,':'
-    JE POLL_START
-    CMP RX_ACTIVE,0
-    JE POLL_NEXT
-    CMP AL,10
-    JE POLL_END
-    CALL PARSE_HEX
-    JC POLL_INVALID
+    MOV DX,3FDH ; Selects UART Line Status Register.
+    IN AL,DX ; Reads UART status.
+    TEST AL,1 ; Checks whether incoming data is available.
+    JZ POLL_DONE ; Returns if no data is available.
+    MOV DX,3F8H ; Selects COM1 receive register.
+    IN AL,DX ; Reads one incoming character.
+    CMP AL,':' ; Checks for packet-start marker.
+    JE POLL_START ; Starts a new packet if : is received.
+    CMP RX_ACTIVE,0 ; Checks whether a packet is currently being received.
+    JE POLL_NEXT ; Ignores characters outside a packet.
+    CMP AL,10 ; Checks for LF (packet-ending character).
+    JE POLL_END ; Finishes the packet.
+    CALL PARSE_HEX ; Converts ASCII hexadecimal into a numeric nibble.
+    JC POLL_INVALID ; Rejects invalid hexadecimal characters.
+    ; Checks whether the current character is the first or second hexadecimal digit.
+    ; For the first digit, shifts its value left by 4 bits.
+    ; Stores it in RX_HIGH.
+    ; Sets RX_HALF = 1, indicating that the second digit is expected.
     CMP RX_HALF,0
     JNE POLL_LOW
     MOV CL,4
@@ -242,8 +273,14 @@ POLL_BYTE:
 POLL_LOW:
     ; Combine low nibble with RX_HIGH, reset half-byte state, bound the
     ; 96-byte receive array, then store the decoded byte and XOR it into RX_CHECK.
+    ; Combines the second hexadecimal digit with the first to reconstruct the original byte.
     OR AL,RX_HIGH
     MOV RX_HALF,0
+    ; Checks that the receive buffer has space.
+    ; Stores the decoded byte.
+    ; Increments the received byte count.
+    ; Updates the XOR checksum.
+    ; Maximum receive buffer size: 96 bytes, including the checksum.
     MOV BX,RX_SIZE
     CMP BX,96
     JAE POLL_INVALID
@@ -251,6 +288,11 @@ POLL_LOW:
     INC RX_SIZE
     XOR RX_CHECK,AL
     JMP POLL_NEXT
+; When LF is received, the procedure verifies:
+; 1. No incomplete hexadecimal byte remains.
+; 2. XOR checksum equals zero.
+; 3. At least 6 decoded bytes were received (5-byte minimum header plus checksum).
+; If valid, it removes the checksum from the payload length and calls RECEIVE_PACKET.
 POLL_END:
     ; Require complete nibble pairs, XOR zero including the checksum, and at
     ; least a five-byte header plus checksum. Remove the checksum from RX_SIZE
@@ -265,16 +307,20 @@ POLL_END:
     DEC RX_SIZE                 ; discard checksum
     CALL RECEIVE_PACKET
     JMP POLL_NEXT
+; Discards the current packet when invalid data is detected.
 POLL_INVALID:
     ; Abandon the current frame and wait for a new colon to resynchronize.
     MOV RX_ACTIVE,0
     JMP POLL_NEXT
+; Starts a fresh packet whenever : is received, resetting all reception variables.
 POLL_START:
     ; Begin a fresh frame with zero length/checksum and no partial nibble.
     MOV RX_ACTIVE,1
     MOV RX_SIZE,0
     MOV RX_HALF,0
     MOV RX_CHECK,0
+; Decrements the processing budget after each received character.
+; If the budget reaches zero or no data is available, the procedure returns to the main program.
 POLL_NEXT:
     ; Charge one byte against the poll budget, then continue if budget remains.
     DEC SER_BUDGET
@@ -284,34 +330,48 @@ POLL_DONE:
     RET
 SERIAL_POLL ENDP
 
+; Creates and queues an ACK (Acknowledgement) packet to inform the sender whether its request was accepted or rejected.
+; ACK Packet Structure
+; The payload contains 7 bytes.
+; Byte offset	Field	                Size
+; 0	            Packet type (81H)	    1 byte
+; 1-2	        Request ID	            2 bytes
+; 3-4	        Room epoch	            2 bytes
+; 5	            ACK status (ACK_CODE)	1 byte
+; 6	            Player slot (ACK_SLOT)	1 byte
+
+; The two-byte fields are stored in little-endian format.
 SEND_ACK PROC NEAR
     ; Only queue an ACK when sufficient tail space remains. The seven-byte
     ; payload contains type 81H, request ID, current room epoch, status and slot.
     ; A slot of FFH means none; OUT_BUFFER is reused after SEND_PACKET encodes it.
-    CMP TX_TAIL,2028
-    JA ACK_DONE
-    MOV OUT_BUFFER,81H
-    MOV AX,WORD PTR RX_BUFFER[1]
-    MOV WORD PTR OUT_BUFFER[1],AX
-    MOV AX,EPOCH
-    MOV WORD PTR OUT_BUFFER[3],AX
-    MOV AL,ACK_CODE
-    MOV OUT_BUFFER[5],AL
-    MOV AL,ACK_SLOT
-    MOV OUT_BUFFER[6],AL
-    LEA SI,OUT_BUFFER
-    MOV CX,7
-    CALL SEND_PACKET
+    CMP TX_TAIL,2028 ; Checks whether sufficient transmission buffer space remains.
+    JA ACK_DONE ; Skips sending if TX_TAIL > 2028.
+    MOV OUT_BUFFER,81H ; Sets packet type to 81H (ACK).
+    MOV AX,WORD PTR RX_BUFFER[1] ; Reads the 2-byte request ID from the received packet.
+    MOV WORD PTR OUT_BUFFER[1],AX ; Copies the request ID into the ACK.
+    MOV AX,EPOCH ; Loads the current room epoch.
+    MOV WORD PTR OUT_BUFFER[3],AX ; Stores the 2-byte epoch in the ACK.
+    MOV AL,ACK_CODE ; Loads the acknowledgement status.
+    MOV OUT_BUFFER[5],AL ; Stores the status code.
+    MOV AL,ACK_SLOT ; Loads the player slot number.
+    MOV OUT_BUFFER[6],AL ; Stores the slot number.
+    LEA SI,OUT_BUFFER ; Points SI to the ACK payload.
+    MOV CX,7 ; Specifies a 7-byte payload.
+    CALL SEND_PACKET ; Encodes the ACK with checksum and queues it.
 ACK_DONE:
     ; Return even if congestion caused this ACK to be skipped; transport stays nonblocking.
     RET
 SEND_ACK ENDP
 
+; Validates received packets and performs multiplayer game operations such as joining, leaving, movement, heartbeat, and ready status.
+; It is the main packet-processing procedure of the racing game.
 RECEIVE_PACKET PROC NEAR
     ; Default to invalid status 3/no slot. All requests must match EPOCH;
     ; stale-room status 4 returns the current epoch to the bridge.
-    MOV ACK_CODE,3              ; invalid
-    MOV ACK_SLOT,0FFH
+    MOV ACK_CODE,3 ; invalid: Sets default status to 3 (invalid request).
+    MOV ACK_SLOT,0FFH ; Sets player slot to FFH (no slot).
+    ; Checks whether the packet belongs to the current room session. If not, returns status 4 (stale room).
     MOV AX,WORD PTR RX_BUFFER[3]
     CMP AX,EPOCH
     JE RECEIVE_EPOCH
@@ -322,6 +382,16 @@ RECEIVE_EPOCH:
     ; slot 0..7, a nonzero matching owner token and a nonempty player state.
     ; An owned request refreshes LAST_SEEN before its command-specific validation;
     ; slot word-array fields use 2*slot. Tokens protect serial session association.
+    ; The procedure selects an operation based on the first byte of the received packet.
+    ; Packet type	Operation
+    ; 1	            Configure room
+    ; 2	            Join game
+    ; 3	            Player movement input
+    ; 4	            Heartbeat
+    ; 5	            Leave game
+    ; 6	            Ready status
+
+    ; For packet types 3-6, it first verifies the player slot, owner ID, and player state.
     CMP RX_BUFFER,1
     JE RECEIVE_CONFIG
     CMP RX_BUFFER,2
@@ -352,6 +422,11 @@ RECEIVE_CONFIG:
     ; Require seventeen payload bytes: header plus twelve room-code characters.
     ; Validate every byte within ASCII '2'..'Z' before copying, so invalid
     ; config data cannot partly replace ROOM_CODE. The existing zero stays after it.
+    ; Requires exactly 17 payload bytes.
+    ; Validates 12 room-code characters.
+    ; Accepts ASCII characters from '2' to 'Z'.
+    ; Copies the validated room code into ROOM_CODE using REP MOVSB.
+    ; Sets ACK_CODE = 0 on success.
     CMP RX_SIZE,17
     JNE RECEIVE_ACK
     LEA SI,RX_BUFFER+5
@@ -374,6 +449,16 @@ CONFIG_CHAR:
 RECEIVE_JOIN:
     ; Require a thirteen-byte request with a nonzero request/owner ID. First
     ; search existing owners so retrying the same join can return the same slot.
+    ; Requires a 13-byte join request.
+    ; The procedure:
+    ; 1. Checks that the request/owner ID is nonzero.
+    ; 2. Checks whether the player has already joined.
+    ; 3. Allows new players only during the lobby phase.
+    ; 4. Checks whether the room has available capacity.
+    ; 5. Finds an empty player slot.
+    ; 6. Validates the 8-character player name.
+    ; 7. Assigns the owner ID and starting position.
+    ; 8. Initializes player state and increments PLAYER_COUNT.
     CMP RX_SIZE,13
     JNE RECEIVE_ACK
     MOV AX,WORD PTR RX_BUFFER[1]
@@ -439,6 +524,7 @@ JOIN_NAME_CHECK:
     MOV AX,SYSTEM_TICK
     MOV LAST_SEEN[BX],AX
     MOV LAST_DIRECTION[BX],AX
+    ; An existing owner receives the same slot without creating another player.
     MOV PLAYER_STATE[SI],1
     MOV READY[SI],0
     MOV HAVE_SEQUENCE[SI],0
@@ -464,6 +550,11 @@ JOIN_ACCEPTED:
 RECEIVE_OWNED:
     ; Only authenticated-to-this-slot serial requests reach this dispatch:
     ; 3=input, 4=heartbeat, 5=leave, 6=ready. Unknown types retain invalid status.
+    ; Before processing movement, heartbeat, leave, or ready requests, the code checks:
+    ; Valid slot number (0-7).
+    ; Matching nonzero owner ID.
+    ; Active player state.
+    ; It also updates LAST_SEEN, which tracks the player's most recent activity.
     CMP RX_BUFFER,3
     JE RECEIVE_INPUT
     CMP RX_BUFFER,4
@@ -476,12 +567,18 @@ RECEIVE_OWNED:
 RECEIVE_HEARTBEAT:
     ; Require exactly eight bytes. The shared ownership path already refreshed
     ; LAST_SEEN; success acknowledges the heartbeat without changing direction.
+    ; Requires exactly 8 bytes.
+    ; Confirms that the player is still connected.
+    ; The common ownership-validation path has already refreshed LAST_SEEN.
     CMP RX_SIZE,8
     JNE RECEIVE_ACK
     MOV ACK_CODE,0
     JMP RECEIVE_ACK
 RECEIVE_LEAVE:
     ; Require exactly eight bytes, drop/revoke the player, then acknowledge success.
+    ; Validates the packet length.
+    ; Calls DROP_PLAYER to remove the player.
+    ; Returns success.
     CMP RX_SIZE,8
     JNE RECEIVE_ACK
     CALL DROP_PLAYER
@@ -490,6 +587,9 @@ RECEIVE_LEAVE:
 RECEIVE_READY:
     ; Only the lobby accepts ready updates. Require nine bytes and Boolean
     ; value 0/1; set READY[slot] for the later all-ready start check.
+    ; Accepts ready updates only during the lobby.
+    ; Requires a 9-byte packet.
+    ; Accepts only 0 (not ready) or 1 (ready).
     CMP PHASE,1
     JNE RECEIVE_ACK
     CMP RX_SIZE,9
@@ -497,9 +597,19 @@ RECEIVE_READY:
     MOV AL,RX_BUFFER[8]
     CMP AL,1
     JA RECEIVE_ACK
+    ; Updates the player's ready status.
     MOV READY[SI],AL
     MOV ACK_CODE,0
     JMP RECEIVE_ACK
+; This section handles player movement during the race.
+; It validates:
+; Packet size = 14 bytes.
+; Game phase = 2 (racing).
+; Player is racing.
+; Map generation matches.
+; Direction is between 0 and 4.
+; Tap flag is either 0 or 1.
+; Input sequence number is newer than the previous accepted sequence.
 RECEIVE_INPUT:
     ; Require fourteen bytes, active race, racing player and current generation.
     ; Validate direction 0..4 and tap Boolean, then reject duplicate/old sequence
@@ -522,6 +632,7 @@ RECEIVE_INPUT:
     MOV AX,WORD PTR RX_BUFFER[10]
     CMP HAVE_SEQUENCE[SI],0
     JE INPUT_NEW
+    ; Rejects duplicate or outdated input using a signed 16-bit sequence difference, allowing normal sequence-number wraparound.
     MOV DX,AX
     SUB DX,LAST_SEQUENCE[BX]
     OR DX,DX                    ; modular signed delta, including 7fff->8000
@@ -530,47 +641,68 @@ INPUT_NEW:
     ; Save accepted sequence and input timestamp. A held update persists until
     ; fresh input/expiry; a tap latches one step in TAPS and clears HELD so one
     ; press does not accidentally become continuous movement.
+    ; Stores the accepted sequence and input timestamp.
     MOV LAST_SEQUENCE[BX],AX
     MOV HAVE_SEQUENCE[SI],1
     MOV AX,SYSTEM_TICK
     MOV LAST_DIRECTION[BX],AX
+    ; Stores the current held direction.
     MOV AL,RX_BUFFER[12]
     MOV HELD[SI],AL
     CMP RX_BUFFER[13],0
     JE INPUT_NOT_TAP
+    ; If the input is a tap, it records a single movement step instead of continuous movement.
     MOV TAPS[SI],AL
     MOV HELD[SI],0              ; first press is exactly one latched step
 INPUT_NOT_TAP:
     ; Mark the validated input successful before using the common ACK path.
     MOV ACK_CODE,0
+; All request paths eventually reach this section, which sends an acknowledgement containing the request result.
+; ACK Status Codes
+; Code	Meaning
+; 0	    Success
+; 1	    Wrong game phase
+; 2	    Room full
+; 3	    Invalid request
+; 4	    Stale room epoch
 RECEIVE_ACK:
     ; Encode the status/slot reply. No request handler directly writes the UART.
     CALL SEND_ACK
     RET
 RECEIVE_PACKET ENDP
 
+; Handles a player leaving or disconnecting from the multiplayer racing game. Its behavior depends on whether the game is in the lobby or racing/results phase.
 DROP_PLAYER PROC NEAR
     ; Clear motion/ready/warning state. In lobby, free the slot, revoke its
     ; owner and reduce count. After lobby, keep the result row but revoke ownership;
     ; a racer becomes DNF, while an already finished player stays finished.
-    MOV HELD[SI],0
-    MOV TAPS[SI],0
-    MOV DIRECTIONS[SI],0
-    MOV READY[SI],0
-    MOV WARNINGS[SI],0
-    CMP PHASE,1
-    JNE DROP_DNF
+    MOV HELD[SI],0 ; Clears continuous movement input.
+    MOV TAPS[SI],0 ; Clears pending movement taps.
+    MOV DIRECTIONS[SI],0 ; Resets movement direction.
+    MOV READY[SI],0 ; Clears ready status.
+    MOV WARNINGS[SI],0 ; Clears player warnings.
+    CMP PHASE,1 ; Checks whether the game is in the lobby.
+    JNE DROP_DNF ; If not in the lobby, jumps to DNF handling.
+    ; Sets player state to 0 (empty slot).
+    ; Calculates the owner's array offset using 2 x SI, because each owner ID occupies 2 bytes.
+    ; Clears the player's owner ID.
+    ; Decreases the player count.
+    ; Returns.
+    ; Result: The player's slot becomes available for another player.
     MOV PLAYER_STATE[SI],0
     MOV BX,SI
     SHL BX,1
     MOV OWNER_IDS[BX],0
     DEC PLAYER_COUNT
     RET
+; Revokes the player's ownership so further requests using the old owner ID are rejected.
 DROP_DNF:
     ; Revoke the owner immediately, then change only a still-racing slot to state 3.
     MOV BX,SI
     SHL BX,1
     MOV OWNER_IDS[BX],0
+    ; If the player is still racing (STATE = 1), changes the state to 3 (DNF - Did Not Finish).
+    ; If the player has already finished, their result remains unchanged.
     CMP PLAYER_STATE[SI],1
     JNE DROP_DONE
     MOV PLAYER_STATE[SI],3
@@ -580,15 +712,41 @@ DROP_DONE:
 DROP_PLAYER ENDP
 
 ; Snapshot is one frame: header plus eight complete records, no torn roster.
+; Creates a snapshot of the current multiplayer racing game, including game information and all 8 player records, then queues it for serial transmission.
 SEND_STATE PROC NEAR
     ; Skip a snapshot if the TX tail exceeds 1400, leaving space for the
     ; full encoded state frame. Build type 82H plus room/map/time metadata
     ; into OUT_BUFFER. STOSB/STOSW write through ES:DI with forward direction.
+    ; Checks whether the transmission queue has sufficient space.
+    ; If TX_TAIL > 1400, skips sending the snapshot to avoid buffer overflow.
     CMP TX_TAIL,1400
     JA STATE_DONE
+    ; DI points to the output buffer.
+    ; 82H identifies a game-state packet.
+    ; STOSB stores one byte at ES:DI and advances DI, assuming the direction flag is cleared.
     LEA DI,OUT_BUFFER
     MOV AL,82H
     STOSB
+    ; Store Game Information
+    ; The following instructions use STOSB and STOSW to write game metadata.
+    ; Variable	        Purpose
+    ; EPOCH	            Current room session
+    ; GENERATION	    Current map version
+    ; PHASE	            Lobby, race, or results
+    ; CAPACITY	        Maximum allowed players
+    ; COLLISION_MODE	Collision settings
+    ; PLAYER_COUNT	    Number of players
+    ; WIN_MASK	        Winner information
+    ; EXIT_POS	        Maze exit position
+    ; COMMON_DISTANCE	Equal route distance
+    ; FLOOR_COUNT	    Number of floors
+    ; ELAPSED_TENTHS	Elapsed race time (32-bit)
+    ; BEST_SCORE	    Best score (32-bit)
+
+    ; Important instructions:
+    ; STOSB: Stores 1 byte and advances DI by 1.
+    ; STOSW: Stores 2 bytes and advances DI by 2.
+    ; Two STOSW instructions are used to store each 32-bit value.
     MOV AX,EPOCH
     STOSW
     MOV AX,GENERATION
@@ -617,6 +775,21 @@ SEND_STATE PROC NEAR
     STOSW
     MOV AX,WORD PTR BEST_SCORE+2
     STOSW
+    ; Initializes BP = 0.
+    ; Uses BP to iterate through all eight player slots.
+    
+    ; Each player record contains:
+    ; Field	        Size
+    ; Player state	1 byte
+    ; Warnings	    1 byte
+    ; Owner ID	    2 bytes
+    ; Position	    2 bytes
+    ; Steps	        4 bytes
+    ; Penalties	    4 bytes
+    ; Finish time	4 bytes
+    ; Ready status	1 byte
+    ; Player name	8 bytes
+    ; Total	        27 bytes
     XOR BP,BP
 STATE_PLAYER:
     ; Serialize all eight slots as fixed records: state, warning, owner, position,
@@ -628,13 +801,14 @@ STATE_PLAYER:
     STOSB
     MOV AL,WARNINGS[SI]
     STOSB
+    ; Multiplies the slot index by 2 to access word arrays such as OWNER_IDS and POSITIONS.
     MOV BX,SI
     SHL BX,1
     MOV AX,OWNER_IDS[BX]
     STOSW
     MOV AX,POSITIONS[BX]
     STOSW
-    SHL BX,1
+    SHL BX,1 ; Multiplies the offset by another 2, giving 4 x slot, to access 32-bit arrays such as STEPS, PENALTIES, and FINISH_TIMES.
     MOV AX,WORD PTR STEPS[BX]
     STOSW
     MOV AX,WORD PTR STEPS[BX+2]
@@ -649,14 +823,20 @@ STATE_PLAYER:
     STOSW
     MOV AL,READY[SI]
     STOSB
+    ; Multiplies the slot index by 8 to locate the player's name.
     MOV CL,3
     SHL SI,CL
     ADD SI,OFFSET PLAYER_NAMES
+    ; Copies the player's 8-character name into the output buffer.
     MOV CX,8
     REP MOVSB
+    ; Increments the player index and repeats until all eight slots are serialized, including empty slots.
     INC BP
     CMP BP,8
     JB STATE_PLAYER
+    ; Calculates the payload size using the difference between the final DI and the beginning of OUT_BUFFER.
+    ; Sets SI to the payload's starting address.
+    ; Calls SEND_PACKET to encode and queue the complete snapshot.
     MOV CX,DI
     SUB CX,OFFSET OUT_BUFFER
     LEA SI,OUT_BUFFER
@@ -669,30 +849,43 @@ SEND_STATE ENDP
 READ_CLOCK PROC NEAR
     ; Read BIOS CX:DX and subtract the previous 32-bit value with SUB/SBB.
     ; A borrow indicates daily rollover, corrected by adding 0018:00B0H ticks.
-    MOV AH,0
-    INT 1AH
-    MOV AX,DX
-    MOV BX,CX
-    SUB AX,WORD PTR LAST_BIOS
-    SBB BX,WORD PTR LAST_BIOS+2
-    JNC READ_CLOCK_OK
-    ADD AX,00B0H
-    ADC BX,0018H
+    MOV AH,0 ; Selects BIOS clock-reading function.
+    INT 1AH ; Reads BIOS timer ticks into CX:DX.
+    MOV AX,DX ; Copies the lower 16 bits of the clock into AX.
+    MOV BX,CX ; Copies the upper 16 bits into BX.
+    SUB AX,WORD PTR LAST_BIOS ; Subtracts the previous clock's lower word.
+    SBB BX,WORD PTR LAST_BIOS+2 ; Subtracts the previous upper word, including borrow.
+    JNC READ_CLOCK_OK ; Skips rollover correction if no borrow occurred.
+    ; Handle Midnight Rollover
+    ; The BIOS timer runs at approximately 18.2 ticks per second and resets at midnight.
+    ; These instructions correct the elapsed tick difference when the clock wraps around midnight.
+    ; The correction value is:
+    ; 001800B0_H = 1572,?
+    ; More precisely, it represents 1,572,? ticks per day according to the constant used in the code; the important point is that it adds one day's tick count to the negative difference.
+    ADD AX,00B0H ; Adds the lower word of the daily tick count.
+    ADC BX,0018H ; Adds the upper word plus carry.
 READ_CLOCK_OK:
     ; Save raw clock, advance low-word SYSTEM_TICK and FRAME_TICKS, and
     ; accumulate/convert elapsed race time only in phase 2. SYSTEM_TICK supports
     ; short unsigned modular lease checks; race time keeps its high word too.
+    ; LAST_BIOS: Stores the current BIOS clock for the next comparison.
+    ; SYSTEM_TICK: Advances the internal game clock.
+    ; FRAME_TICKS: Tracks ticks for frame updates.
     MOV WORD PTR LAST_BIOS,DX
     MOV WORD PTR LAST_BIOS+2,CX
     ADD SYSTEM_TICK,AX
     ADD FRAME_TICKS,AX
+    ; Only updates the race timer when PHASE = 2 (racing).
     CMP PHASE,2
     JNE CLOCK_DONE
+    ; Adds the elapsed ticks to the 32-bit race timer.
     ADD WORD PTR ELAPSED_TICKS,AX
     ADC WORD PTR ELAPSED_TICKS+2,BX
+    ; Converts accumulated BIOS ticks into tenths of a second.
     MOV AX,WORD PTR ELAPSED_TICKS
     MOV DX,WORD PTR ELAPSED_TICKS+2
     CALL TICKS_TO_TENTHS
+    ; Stores the converted race time.
     MOV WORD PTR ELAPSED_TENTHS,AX
     MOV WORD PTR ELAPSED_TENTHS+2,DX
 CLOCK_DONE:
@@ -702,9 +895,15 @@ READ_CLOCK ENDP
 GAME_TICK PROC NEAR
     ; Run lease/movement updates when at least two ticks accrued. Reset the
     ; frame budget rather than replaying a backlog of delayed movement frames.
+    ; Runs the game update only when at least 2 BIOS ticks have passed (approximately 0.11 seconds).
+    ; Resets the frame counter.
+    ; Prevents movement from updating too frequently.
     CMP FRAME_TICKS,2
     JB GAME_DONE
     MOV FRAME_TICKS,0
+    ; Initializes SI = 0.
+    ; Checks all 8 player slots.
+    ; Processes only players with state 1 (actively racing).
     XOR SI,SI
 LEASE_PLAYER:
     ; For each racing slot, use 2*slot to address timestamps. During a race,
@@ -713,8 +912,12 @@ LEASE_PLAYER:
     ; explicit leave/removal revokes it through DROP_PLAYER instead.
     CMP PLAYER_STATE[SI],1
     JNE LEASE_NEXT
+    ; Calculates 2 x SI to access 16-bit timestamp arrays.
     MOV BX,SI
     SHL BX,1
+    ; Checks connection inactivity during the race.
+    ; Calculates the time since the player's last valid request.
+    ; If inactivity reaches 546 ticks (approximately 30 seconds), the player times out.
     CMP PHASE,2
     JNE LEASE_HELD
     MOV AX,SYSTEM_TICK
@@ -723,6 +926,8 @@ LEASE_PLAYER:
     JB LEASE_HELD
     ; Timed-out players retain identity only to read their terminal DNF status.
     ; Explicit leave/host removal below revokes ownership immediately.
+    ; Marks the player DNF (Did Not Finish) and clears movement-related state.
+    ; Unlike DROP_PLAYER, this timeout retains the player's ownership information.
     MOV PLAYER_STATE[SI],3
     MOV HELD[SI],0
     MOV TAPS[SI],0
@@ -733,12 +938,18 @@ LEASE_PLAYER:
 LEASE_HELD:
     ; A direction older than fourteen ticks (about 0.77 seconds) loses HELD/TAPS,
     ; even if heartbeats kept the session alive, preventing stale movement.
+    ; Checks when the player last sent a valid direction.
+    ; If the input is at least 14 ticks old (approximately 0.77 seconds), it expires.
     MOV AX,SYSTEM_TICK
     SUB AX,LAST_DIRECTION[BX]
     CMP AX,14
     JB LEASE_FRESH
+    ; Clears stale movement inputs to prevent unintended continuous movement.
     MOV HELD[SI],0
     MOV TAPS[SI],0
+; Normally uses the held direction.
+; If a tap is pending, prioritizes the tap.
+; Clears the tap after consuming it so it produces only one movement step.
 LEASE_FRESH:
     ; Prefer a queued tap over held direction for this frame, then consume it.
     MOV AL,HELD[SI]
@@ -746,15 +957,25 @@ LEASE_FRESH:
     JE LEASE_SAVE
     MOV AL,TAPS[SI]
     MOV TAPS[SI],0
+; Stores the selected direction for the movement engine.
 LEASE_SAVE:
     ; Publish the leased direction into DIRECTIONS for the core intent builder.
     MOV DIRECTIONS[SI],AL
 LEASE_NEXT:
     ; After every slot, phase 2 performs intents, collision resolution, commit
     ; and proximity warnings. Lobby/results skip game motion.
+    ; Moves to the next player until all 8 slots have been checked.
     INC SI
     CMP SI,8
     JB LEASE_PLAYER
+    ; These procedures handle the actual racing logic.
+    ; Procedure	        Purpose
+    ; BUILD_INTENTS	    Determines each player's intended movement.
+    ; RESOLVE_MOVES	    Resolves movement conflicts and collisions.
+    ; COMMIT_MOVES	    Applies accepted movements to player positions.
+    ; UPDATE_WARNINGS	Updates proximity or collision warnings.
+
+    ; These are called only during the racing phase.
     CMP PHASE,2
     JNE GAME_DONE
     CALL BUILD_INTENTS
@@ -762,6 +983,9 @@ LEASE_NEXT:
     CALL COMMIT_MOVES
     CALL UPDATE_WARNINGS
     XOR SI,SI
+; Checks whether any player is still racing.
+; If at least one player remains active, the race continues.
+; If no players remain active, the race ends.
 CHECK_REMAINING:
     ; If no slot remains racing, enter results phase and choose winners only
     ; from finishers. A race with only DNF outcomes can have no winner bits.
@@ -770,37 +994,39 @@ CHECK_REMAINING:
     INC SI
     CMP SI,8
     JB CHECK_REMAINING
+    ; Changes the game to the results phase and determines the winners from players who finished successfully.
     MOV PHASE,3
     CALL FIND_WINNERS
 GAME_DONE:
     ; Return to serial flushing/rendering without waiting for the next tick.
     RET
 GAME_TICK ENDP
+; Starts the race only when the game is in the lobby, at least two players have joined, and every connected player is ready.
 START_RACE PROC NEAR
     ; Only lobby with at least two participants can start. Require every
     ; nonempty slot to be ready, then enter phase 2 and reset race/frame timers.
-    CMP PHASE,1
-    JNE START_DONE
-    CMP PLAYER_COUNT,2
-    JB START_DONE
-    XOR SI,SI
+    CMP PHASE,1 ; Checks whether the game is in the lobby.
+    JNE START_DONE ; Returns if the game is not in the lobby.
+    CMP PLAYER_COUNT,2 ; Checks whether at least 2 players have joined.
+    JB START_DONE ; Returns if fewer than 2 players are present.
+    XOR SI,SI ; Initializes player index SI = 0.
 START_CHECK:
     ; Empty slots do not need readiness; any occupied unready slot aborts start.
-    CMP PLAYER_STATE[SI],0
-    JE START_NEXT
-    CMP READY[SI],0
-    JE START_DONE
+    CMP PLAYER_STATE[SI],0 ; Checks whether the player slot is empty.
+    JE START_NEXT ; Skips empty slots.
+    CMP READY[SI],0 ; Checks whether an occupied player is ready.
+    JE START_DONE ; Cancels starting if any occupied player is not ready.
 START_NEXT:
     ; After all eight slots pass, initialize the common race clock to zero.
-    INC SI
-    CMP SI,8
-    JB START_CHECK
-    MOV PHASE,2
-    MOV WORD PTR ELAPSED_TICKS,0
-    MOV WORD PTR ELAPSED_TICKS+2,0
-    MOV WORD PTR ELAPSED_TENTHS,0
-    MOV WORD PTR ELAPSED_TENTHS+2,0
-    MOV FRAME_TICKS,0
+    INC SI ; Moves to the next player slot.
+    CMP SI,8 ; Checks whether all 8 slots have been examined.
+    JB START_CHECK ; Repeats until all slots are checked.
+    MOV PHASE,2 ; Changes the game phase to racing.
+    MOV WORD PTR ELAPSED_TICKS,0 ; Resets the lower 16 bits of elapsed ticks.
+    MOV WORD PTR ELAPSED_TICKS+2,0 ; Resets the upper 16 bits.
+    MOV WORD PTR ELAPSED_TENTHS,0 ; Resets the lower 16 bits of race time.
+    MOV WORD PTR ELAPSED_TENTHS+2,0 ; Resets the upper 16 bits.
+    MOV FRAME_TICKS,0 ; Resets the frame timer.
 START_DONE:
     ; Return whether start succeeded or a prerequisite caused a no-op.
     RET

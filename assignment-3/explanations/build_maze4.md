@@ -21,7 +21,7 @@ The intended transformation is:
 
 ```text
 MAZE4.ASM + M4CORE.INC + M4SER.INC + M4UI.INC
-    → stage source copies in project scratch
+    → stage source copies in the build directory
     → DOSBox runs the supplied assembler
     → assembler produces MAZE4.OBJ
     → DOSBox runs the supplied linker
@@ -127,7 +127,7 @@ still invokes MASM only once, on `MAZE4.ASM`. For the include contents, see
 
 ```python
 def environment():
-    tmp = ROOT / ".scratch" / "tmp"
+    tmp = ROOT / "build" / "maze4" / "tmp"
     tmp.mkdir(parents=True, exist_ok=True)
     return dict(os.environ, TMPDIR=str(tmp), TMP=str(tmp), TEMP=str(tmp))
 ```
@@ -136,7 +136,7 @@ def environment():
 operator joins `Path` components here. It is not numeric division because the left operand
 is a path object.
 
-`tmp` therefore points to `masm/.scratch/tmp`. `parents=True` allows creation of missing
+`tmp` therefore points to `masm/build/maze4/tmp`. `parents=True` allows creation of missing
 parent directories. `exist_ok=True` permits an existing directory at that path. It does not
 make an existing ordinary file usable as a directory. See the official [`Path.mkdir()`
 documentation](https://docs.python.org/3/library/pathlib.html#pathlib.Path.mkdir).
@@ -174,7 +174,7 @@ explains its other calls separately.
 
 ```python
 def build():
-    stage = ROOT / ".scratch" / "maze4-phone" / "build"
+    stage = ROOT / "build" / "maze4" / "assembly"
     stage.mkdir(parents=True, exist_ok=True)
     (stage / "TMP").mkdir(exist_ok=True)
 ```
@@ -187,8 +187,8 @@ The two temporary directories have different users:
 
 | Host path | Purpose |
 | --- | --- |
-| `masm/.scratch/tmp` | Temporary-directory variables passed to host processes |
-| `masm/.scratch/maze4-phone/build/TMP` | Directory exposed to DOS tools as `C:\TMP` |
+| `masm/build/maze4/tmp` | Temporary-directory variables passed to host processes |
+| `masm/build/maze4/assembly/TMP` | Directory exposed to DOS tools as `C:\TMP` |
 
 The uppercase directory name matches the DOS batch file's spelling. The builder reuses this
 same stage on later calls. It does not create a fresh random directory for each invocation.
@@ -673,11 +673,11 @@ at module load:
     SOURCES ← the four MAZE4 assembly input names
 
 environment():
-    create/reuse ROOT/.scratch/tmp
+    create/reuse ROOT/build/maze4/tmp
     return a copy of the host environment with three temp paths replaced
 
 build():
-    create/reuse the fixed scratch build directory and its TMP child
+    create/reuse the fixed assembly staging directory and its TMP child
     require MASM.EXE, ML.EXE, and LINK.EXE under ROOT/dos-tools
     copy each named assembly input into the stage
     write the DOS batch commands and the build-only DOSBox configuration

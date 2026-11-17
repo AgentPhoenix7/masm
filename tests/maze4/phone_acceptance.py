@@ -25,8 +25,8 @@ from pathlib import Path
 from typing import TypeVar
 
 ROOT = Path(__file__).resolve().parents[2]
-OUT = ROOT / ".scratch" / "maze4-phone" / "acceptance"
-TRACE = ROOT / ".scratch" / "maze4-phone" / "run" / "state.json"
+OUT = ROOT / "build" / "maze4" / "acceptance"
+TRACE = ROOT / "build" / "maze4" / "run" / "state.json"
 sys.path.insert(0, str(ROOT / "assignment-3"))
 from build_maze4 import environment
 
